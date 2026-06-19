@@ -1,0 +1,35 @@
+# Configuration for the Geneva quickstart CLIs.
+# Copy to config.yaml and fill in. config.yaml is gitignored.
+#
+# This is the single source of truth: secrets, the connection target, and the
+# table identity shared by the ingest and stage CLIs.
+
+# --- Required ---
+# LanceDB Cloud API key.
+lancedb_api_key: "your-lancedb-api-key"
+
+# LanceDB Cloud region.
+lancedb_region: "us-east-1"
+
+# Geneva host (the remote runtime load-balancer endpoint).
+geneva_host: "http://<elb-host>:10024"
+
+# --- Table identity (shared across ingest + stage CLIs) ---
+db_uri: "db://quickstart"
+table_name: "images"
+
+# --- R2 / S3 storage credentials ---
+# Storage options are only applied when access key, secret key, endpoint, and
+# region are all present; otherwise they are omitted.
+# r2_access_key: "your-r2-access-key"
+# r2_secret_key: "your-r2-secret-key"
+# r2_endpoint: "https://<account>.r2.cloudflarestorage.com"
+# r2_region: "auto"
+# aws_allow_http: "false"
+
+# --- Hugging Face ---
+# Optional token for reading hf:// datasets (e.g. the OpenVid blob source during
+# chunking). Raises the per-IP anonymous rate limit to your authenticated quota,
+# which matters when many cluster workers read from HF concurrently. Injected
+# into the chunker workers' env as HF_TOKEN when set.
+# hf_token: "hf_..."

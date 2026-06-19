@@ -1,0 +1,46 @@
+# Pre-commit hooks. Install once with:  uv run pre-commit install
+# Run on demand with:                   uv run pre-commit run --all-files
+# ruff (lint+format) and the generic file hooks gate every commit; ty is a
+# preview type checker wired as a manual (non-blocking) hook — run it with:
+#     uv run pre-commit run ty --hook-stage manual --all-files
+#     # or simply: uv run ty check geneva_examples
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]  # allow uv.lock (~640 KB); block stray media
+
+  # ruff lint + format, pinned via the project's dev dependency group so the
+  # hook and `uv run ruff` are always the same version (single source of truth).
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      # ty is in preview (0.0.x) and still reports many false positives on
+      # untyped ML deps, so it does NOT gate commits. It stays one command away.
+      - id: ty
+        name: ty (type check — preview, non-blocking)
+        entry: uv run ty check geneva_examples
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]

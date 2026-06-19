@@ -1,0 +1,167 @@
+[project]
+name = "geneva-examples"
+version = "0.1.0"
+description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs — no Kubernetes required."
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.24.0",
+    "pyyaml>=6.0",
+    # Pin the LanceDB stack to the versions the deployed cluster was built
+    # against (client/server must match or declare_table 500s). pylance 8.0.x
+    # lives on the lance-format index (see [tool.uv.sources]). pyarrow/numpy are
+    # left to geneva's own constraints. geneva 0.13.0b17+ adds source_task_size
+    # to chunker-view refresh; b18 requires pylance>=8.0.0b11.
+    "geneva==0.13.0b18",
+    "lancedb==0.33.1b2",
+    "pylance==8.0.0b16",
+    "pyarrow",
+    "numpy",
+    "pillow>=10",
+    "torch>=2.2",
+    "open-clip-torch>=2.24",
+    "transformers>=4.40",
+    "datasets>=3.0.0",
+    # Explicit (already transitive via datasets): enables the `hf://datasets/...`
+    # connect URI used by the OpenVid ingest CLI.
+    "huggingface-hub>=0.24",
+    # PyAV: video demux/transcode for chunk_videos.py and seed_video_clips.py.
+    "av>=13",
+]
+
+[project.scripts]
+ingest-images = "geneva_examples.pipeline.ingest_images:app"
+ingest-videos = "geneva_examples.pipeline.ingest_videos:app"
+ingest-videos-openvid = "geneva_examples.pipeline.ingest_videos_openvid:app"
+chunk-videos = "geneva_examples.pipeline.chunk_videos:app"
+chunk-videos-openvid = "geneva_examples.pipeline.chunk_videos_openvid:app"
+seed-video-clips = "geneva_examples.pipeline.seed_video_clips:app"
+cleanup = "geneva_examples.pipeline.cleanup:app"
+lightweight = "geneva_examples.pipeline.stages.lightweight:app"
+embed = "geneva_examples.pipeline.stages.embeddings:app"
+caption = "geneva_examples.pipeline.stages.captions:app"
+frame-embed = "geneva_examples.pipeline.stages.frame_embed:app"
+frame-caption = "geneva_examples.pipeline.stages.frame_caption:app"
+frame-openpose = "geneva_examples.pipeline.stages.frame_openpose:app"
+stats = "geneva_examples.ops.stats:app"
+jobs = "geneva_examples.ops.jobs:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["geneva_examples"]
+
+# Geneva/LanceDB betas are published to Gemfury, not public PyPI. Allow
+# prereleases so the unpinned lancedb/pylance resolve to their beta versions.
+[tool.uv]
+prerelease = "allow"
+
+# Two Gemfury indexes, both `explicit` so only the packages pinned in
+# [tool.uv.sources] resolve from them; everything else stays on PyPI:
+#   - lancedb       → geneva, lancedb
+#   - lance-format  → pylance (7.x+ betas live here, not on the lancedb repo)
+[[tool.uv.index]]
+name = "lancedb"
+url = "https://pypi.fury.io/lancedb/"
+explicit = true
+
+[[tool.uv.index]]
+name = "lance-format"
+url = "https://pypi.fury.io/lance-format/"
+explicit = true
+
+[tool.uv.sources]
+geneva = { index = "lancedb" }
+lancedb = { index = "lancedb" }
+pylance = { index = "lance-format" }
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.18",
+    "ty>=0.0.50",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# Sensible default set. The bandit (S) + blind-except (BLE) families are kept on
+# because the code already carries targeted `# noqa: S.../BLE001` suppressions;
+# RUF100 then flags any that become stale.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "S", "BLE", "RUF"]
+ignore = [
+    "E501",   # line length: the formatter wraps code; long strings/URLs/comments are fine
+    "B008",   # function call in default arg — this is exactly how Typer options are declared
+    "S310",   # urlopen targets are hardcoded HF/Ray HTTP(S) endpoints, not user input
+    "S108",   # "/tmp/..." paths are correct on the remote Ray workers, not the client
+    "S110",   # try/except/pass: best-effort drop-if-exists / optional cleanup is idiomatic here
+    "SIM105", # keep the explicit try/except/pass over contextlib.suppress (readability)
+    "RUF001", # ambiguous-unicode in strings: ×, em dash, … are intentional typography
+    "RUF002", # ditto, in docstrings
+    "RUF003", # ditto, in comments
+    "C408",   # dict(key=…) kwargs form is intentional/readable for DataLoader kwargs
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: asserts are the point; temp paths and small fixtures are fine.
+"tests/**" = ["S101", "S102", "S108"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-q",
+    "--cov=geneva_examples",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=90",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["geneva_examples"]
+# Excluded from the line-coverage GATE because their bodies need a live
+# Geneva/Ray cluster, GPUs, HTTP, or model weights. Their pure helpers ARE
+# unit-tested (see tests/test_ops_*.py, test_udfs.py, test_pipeline_runner.py) —
+# those tests run in CI and guard against regressions, they just don't inflate
+# the coverage percentage with half-runnable files.
+omit = [
+    # Pipeline CLIs (open a cluster connection). _runner.py is fully tested -> kept in.
+    "geneva_examples/pipeline/ingest_images.py",
+    "geneva_examples/pipeline/ingest_videos.py",
+    "geneva_examples/pipeline/ingest_videos_openvid.py",
+    "geneva_examples/pipeline/chunk_videos.py",
+    "geneva_examples/pipeline/chunk_videos_openvid.py",
+    "geneva_examples/pipeline/seed_video_clips.py",
+    "geneva_examples/pipeline/cleanup.py",
+    "geneva_examples/pipeline/stages/lightweight.py",
+    "geneva_examples/pipeline/stages/embeddings.py",
+    "geneva_examples/pipeline/stages/captions.py",
+    "geneva_examples/pipeline/stages/frame_embed.py",
+    "geneva_examples/pipeline/stages/frame_caption.py",
+    "geneva_examples/pipeline/stages/frame_openpose.py",
+    # Ops CLIs: dominated by cluster/HTTP command bodies.
+    "geneva_examples/ops/*",
+    # Model UDFs need torch + weights at call time; only their manifests are tested.
+    # imageinfo.py is pure and fully tested -> kept in.
+    "geneva_examples/udfs/clip.py",
+    "geneva_examples/udfs/blip.py",
+    "geneva_examples/udfs/openpose.py",
+    "geneva_examples/udfs/chunkers.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
