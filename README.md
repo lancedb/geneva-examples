@@ -132,5 +132,5 @@ make check     # lint + format-check + tests (the CI gate)
 make test      # pytest with coverage
 ```
 
-Tests run without a live cluster: they exercise the UDF manifests, the pure
-helpers, config loading, and the `stats`/`jobs` formatting helpers.
+Tests exercise the UDF manifests, the pure helpers, config loading, and the
+`stats`/`jobs` formatting helpers.
