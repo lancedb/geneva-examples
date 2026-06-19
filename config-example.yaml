@@ -18,13 +18,13 @@ geneva_host: "http://<elb-host>:10024"
 db_uri: "db://quickstart"
 table_name: "images"
 
-# --- R2 / S3 storage credentials ---
+# --- S3-compatible storage credentials ---
 # Storage options are only applied when access key, secret key, endpoint, and
 # region are all present; otherwise they are omitted.
-# r2_access_key: "your-r2-access-key"
-# r2_secret_key: "your-r2-secret-key"
-# r2_endpoint: "https://<account>.r2.cloudflarestorage.com"
-# r2_region: "auto"
+# s3_access_key: "your-s3-access-key"
+# s3_secret_key: "your-s3-secret-key"
+# s3_endpoint: "https://s3.us-east-1.amazonaws.com"
+# s3_region: "us-east-1"
 # aws_allow_http: "false"
 
 # --- Hugging Face ---

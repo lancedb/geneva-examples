@@ -18,34 +18,34 @@ DEFAULT_TABLE_NAME = "images"
 
 @dataclass
 class Config:
-    """Resolved configuration for LanceDB Cloud, R2/S3 storage, and the table."""
+    """Resolved configuration for LanceDB Cloud, S3-compatible storage, and the table."""
 
     lancedb_api_key: str
     lancedb_region: str
     geneva_host: str
     db_uri: str
     table_name: str
-    r2_access_key: str | None
-    r2_secret_key: str | None
-    r2_endpoint: str | None
-    r2_region: str | None
+    s3_access_key: str | None
+    s3_secret_key: str | None
+    s3_endpoint: str | None
+    s3_region: str | None
     aws_allow_http: str
     hf_token: str | None
 
     def storage_options(self) -> dict[str, str] | None:
-        """Build S3/R2 ``storage_options``; ``None`` unless all four creds present."""
+        """Build S3 ``storage_options``; ``None`` unless all four creds present."""
         if not (
-            self.r2_access_key
-            and self.r2_secret_key
-            and self.r2_endpoint
-            and self.r2_region
+            self.s3_access_key
+            and self.s3_secret_key
+            and self.s3_endpoint
+            and self.s3_region
         ):
             return None
         return {
-            "aws_access_key_id": self.r2_access_key,
-            "aws_secret_access_key": self.r2_secret_key,
-            "aws_endpoint": self.r2_endpoint,
-            "aws_region": self.r2_region,
+            "aws_access_key_id": self.s3_access_key,
+            "aws_secret_access_key": self.s3_secret_key,
+            "aws_endpoint": self.s3_endpoint,
+            "aws_region": self.s3_region,
             "aws_s3_force_path_style": "true",
             "aws_allow_http": self.aws_allow_http,
         }
@@ -81,10 +81,10 @@ def load_config(config_path: Path | None = None) -> Config:
         geneva_host=data["geneva_host"],
         db_uri=data.get("db_uri") or DEFAULT_DB_URI,
         table_name=data.get("table_name") or DEFAULT_TABLE_NAME,
-        r2_access_key=data.get("r2_access_key"),
-        r2_secret_key=data.get("r2_secret_key"),
-        r2_endpoint=data.get("r2_endpoint"),
-        r2_region=data.get("r2_region"),
+        s3_access_key=data.get("s3_access_key"),
+        s3_secret_key=data.get("s3_secret_key"),
+        s3_endpoint=data.get("s3_endpoint"),
+        s3_region=data.get("s3_region"),
         aws_allow_http=data.get("aws_allow_http") or "false",
         hf_token=data.get("hf_token") or None,
     )

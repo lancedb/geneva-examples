@@ -27,10 +27,10 @@ def test_load_minimal_applies_defaults(tmp_path: Path):
     assert cfg.storage_options() is None
 
 
-def test_storage_options_requires_all_four_r2_fields(tmp_path: Path):
+def test_storage_options_requires_all_four_s3_fields(tmp_path: Path):
     body = (
         "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\n"
-        "r2_access_key: a\nr2_secret_key: s\nr2_endpoint: e\nr2_region: auto\n"
+        "s3_access_key: a\ns3_secret_key: s\ns3_endpoint: e\ns3_region: auto\n"
     )
     opts = load_config(_write(tmp_path / "c.yaml", body)).storage_options()
     assert opts["aws_access_key_id"] == "a"
@@ -38,7 +38,7 @@ def test_storage_options_requires_all_four_r2_fields(tmp_path: Path):
 
 
 def test_storage_options_none_when_partial(tmp_path: Path):
-    body = "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\nr2_access_key: a\n"
+    body = "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\ns3_access_key: a\n"
     assert load_config(_write(tmp_path / "c.yaml", body)).storage_options() is None
 
 

@@ -70,7 +70,7 @@ cp config-example.yaml config.yaml
 | `geneva_host`     | **yes**  | —                 | Reachable Geneva runtime URL (load balancer).|
 | `db_uri`          | no       | `db://quickstart` | Database URI, shared by every CLI.           |
 | `table_name`      | no       | `images`          | Table name, shared by every CLI.             |
-| `r2_*`            | no       | —                 | R2/S3 storage creds (all four or none).      |
+| `s3_*`            | no       | —                 | S3 storage creds (all four or none).         |
 | `hf_token`        | no       | —                 | Hugging Face token (raises HF rate limits).  |
 
 A missing `config.yaml`, or one missing any required field, fails with a clear
