@@ -26,6 +26,9 @@ dependencies = [
     "huggingface-hub>=0.24",
     # PyAV: video demux/transcode for chunk_videos.py and seed_video_clips.py.
     "av>=13",
+    # UDF Studio: in-browser Gradio sandbox for prototyping UDFs/chunkers.
+    # >=4.44 for gr.Timer.
+    "gradio>=4.44",
 ]
 
 [project.scripts]
@@ -44,6 +47,7 @@ frame-caption = "geneva_examples.pipeline.stages.frame_caption:app"
 frame-openpose = "geneva_examples.pipeline.stages.frame_openpose:app"
 stats = "geneva_examples.ops.stats:app"
 jobs = "geneva_examples.ops.jobs:app"
+udf-studio = "geneva_examples.apps.udf_studio:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -108,6 +112,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# UDF Studio executes user-edited code in-process by design (it's a sandbox).
+"geneva_examples/apps/studio/runner.py" = ["S102"]
 # Tests: asserts are the point; temp paths and small fixtures are fine.
 "tests/**" = ["S101", "S102", "S108"]
 
@@ -149,6 +155,9 @@ omit = [
     "geneva_examples/pipeline/stages/frame_openpose.py",
     # Ops CLIs: dominated by cluster/HTTP command bodies.
     "geneva_examples/ops/*",
+    # Gradio UI wiring (event handlers need a browser runtime). The studio
+    # submodule (runner/library/samples/templates) IS unit-tested -> kept in.
+    "geneva_examples/apps/udf_studio.py",
     # Model UDFs need torch + weights at call time; only their manifests are tested.
     # imageinfo.py is pure and fully tested -> kept in.
     "geneva_examples/udfs/clip.py",

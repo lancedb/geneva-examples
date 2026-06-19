@@ -16,6 +16,8 @@ What's here:
 2. **Pipeline CLIs** that ingest data and submit the UDFs as Geneva backfills.
 3. **Two inspection CLIs** — `stats` and `jobs` — that read table/job state over
    the same connection (no cluster shell access needed).
+4. **UDF Studio** — a Gradio app for prototyping UDFs/chunkers locally before
+   wiring them into a stage (see below).
 
 The UDF bodies are self-contained closures: their imports and helpers are
 nested inside the factory so they ship to the remote Geneva workers via the
@@ -113,6 +115,29 @@ uv run jobs kill <job_id> # cancel a Geneva job by id
 
 Both connect via `config.yaml` (override with `--config`/`--db-uri`) — no
 cluster shell access required.
+
+## UDF Studio
+
+A Gradio app for prototyping UDFs and chunkers before wiring them into a stage.
+Pick a template, point it at sample data on disk, and run your function
+**locally on the driver** (no Ray, GPU, or cluster) to see its output.
+
+```bash
+uv run udf-studio                 # http://127.0.0.1:7860, samples from ./studio_data
+uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib --host 0.0.0.0
+```
+
+- **Contract.** A UDF defines `transform(value)` (one input → one output); a
+  chunker defines `chunk(value)` that yields one `dict` per output row. Code at
+  module level runs once per Run, so load models there.
+- **Sample data** comes from `--data-dir` (default `studio_data/`): drop files
+  into `images/`, `videos/`, `audio/`, or rows into `input.csv` (text). See
+  [`studio_data/README.md`](studio_data/README.md). The sample media itself is
+  gitignored — add your own.
+- **Library.** Save/load work-in-progress to a local LanceDB at `--library`
+  (default `udf_library/`).
+- It never builds a manifest or submits to the cluster — promoting a finished
+  function to a `geneva_examples/udfs/` factory + a stage CLI stays a manual step.
 
 ## Development
 

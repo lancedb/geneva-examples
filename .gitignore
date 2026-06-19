@@ -4,6 +4,15 @@ config.yaml
 # local MP4 download cache (ingest-videos)
 video_cache/
 
+# UDF Studio sample data: keep the directory layout, ignore user-provided media.
+studio_data/images/*
+studio_data/videos/*
+studio_data/audio/*
+!studio_data/**/.gitkeep
+
+# UDF Studio local LanceDB library of saved work-in-progress functions.
+udf_library/
+
 # --- Byte-compiled / optimized / DLL files ---
 __pycache__/
 *.py[cod]

@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help install lock lint lint-fix format format-check typecheck \
-        test check precommit hooks clean
+        test check precommit hooks udf-studio clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -41,6 +41,9 @@ precommit: ## Run all pre-commit hooks across the repo
 
 hooks: ## Install the git pre-commit hook
 	uv run pre-commit install
+
+udf-studio: ## Launch UDF Studio (Gradio)
+	uv run udf-studio
 
 clean: ## Remove caches and coverage artifacts
 	rm -rf .pytest_cache .ruff_cache .coverage coverage.xml htmlcov
