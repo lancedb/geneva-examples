@@ -1,7 +1,7 @@
 [project]
 name = "geneva-examples"
 version = "0.1.0"
-description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs — no Kubernetes required."
+description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.24.0",

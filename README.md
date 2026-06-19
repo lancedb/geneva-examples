@@ -2,8 +2,7 @@
 
 A self-contained set of **example UDFs** and the **submission tooling** to run
 them against LanceDB Cloud + a remote Geneva runtime. Point it at your Geneva
-host, fill in three config values, and run a backfill — **no Kubernetes access
-required**.
+host, fill in three config values, and run a backfill.
 
 What's here:
 
@@ -15,26 +14,13 @@ What's here:
    - `chunkers` — video-chunking UDTFs (split videos into fixed-length clips)
 2. **Pipeline CLIs** that ingest data and submit the UDFs as Geneva backfills.
 3. **Two inspection CLIs** — `stats` and `jobs` — that read table/job state over
-   the same connection (no cluster shell access needed).
+   the same connection.
 4. **UDF Studio** — a Gradio app for prototyping UDFs/chunkers locally before
    wiring them into a stage (see below).
 
 The UDF bodies are self-contained closures: their imports and helpers are
 nested inside the factory so they ship to the remote Geneva workers via the
 pinned pip manifests and run there. The driver/CLI code stays lightweight.
-
-## How submission works (and why no Kubernetes is needed)
-
-Every CLI connects with `geneva.connect(host_override=<geneva_host>, …)` and
-calls `table.backfill(…)`. That submission travels over HTTP/Ray to the remote
-runtime — there is no `kubectl`, kubeconfig, namespace, or port-forward anywhere
-in the path. The only requirement is that **`geneva_host` is a URL your machine
-can reach** (a load-balancer / query-node endpoint).
-
-> If your Geneva cluster isn't directly exposed and you happen to have cluster
-> access, you *can* still reach it by port-forwarding to `localhost` — but that
-> is optional and outside what this package needs. The supported path is a
-> directly reachable `geneva_host`.
 
 ## Requirements
 
@@ -113,8 +99,7 @@ uv run jobs --all         # include DONE/FAILED/CANCELLED
 uv run jobs kill <job_id> # cancel a Geneva job by id
 ```
 
-Both connect via `config.yaml` (override with `--config`/`--db-uri`) — no
-cluster shell access required.
+Both connect via `config.yaml` (override with `--config`/`--db-uri`).
 
 ## UDF Studio
 
