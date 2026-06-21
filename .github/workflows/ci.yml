@@ -78,7 +78,13 @@ jobs:
           uvx pip-audit -r requirements.txt
         continue-on-error: true
 
+      # Run the gitleaks binary directly: it's MIT-licensed and free, whereas the
+      # gitleaks-action wrapper now requires a paid GITLEAKS_LICENSE for org repos.
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSLf \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks git . --redact --no-banner --verbose
