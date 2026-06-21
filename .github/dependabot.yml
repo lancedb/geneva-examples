@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current (Dependabot bumps both the SHA and
+  # the trailing version comment).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # Python dependencies via uv (reads pyproject.toml + uv.lock). The cluster-matched
+  # betas are intentionally pinned to the deployed Geneva/LanceDB build, and
+  # pyarrow/numpy are left to geneva's own constraints — Dependabot must not touch
+  # those, only the loose deps (typer, gradio, transformers, etc.).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "geneva"
+      - dependency-name: "lancedb"
+      - dependency-name: "pylance"
+      - dependency-name: "pyarrow"
+      - dependency-name: "numpy"
