@@ -27,8 +27,12 @@ jobs:
       # come from the public Gemfury indexes declared in pyproject.toml; if those
       # ever require auth, add UV_INDEX_LANCEDB_PASSWORD / UV_INDEX_LANCE_FORMAT_PASSWORD
       # repo secrets and pass them here as env.
-      - name: Sync dependencies
-        run: uv sync --group dev
+      #
+      # --locked asserts uv.lock is in sync with pyproject.toml and fails the job
+      # on drift (e.g. a dependency edit without `uv lock`) instead of silently
+      # updating it — guarding the deliberate cluster pins.
+      - name: Sync dependencies (lockfile must be up to date)
+        run: uv sync --locked --group dev
 
       - name: Ruff lint
         run: uv run ruff check --output-format=github
