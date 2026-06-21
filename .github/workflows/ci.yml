@@ -52,3 +52,33 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: ignore
+
+  # Security hardening: a dependency CVE scan and a secret scan, run in parallel
+  # with `test`. The dependency audit is advisory (continue-on-error) — like the
+  # `ty` step — because the geneva/lancedb/pylance betas come from Gemfury and may
+  # not be known to the advisory DB. The secret scan IS allowed to fail the job.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # gitleaks scans history
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      # Export the locked dependency set (without this project) and audit the
+      # pinned versions against the PyPI advisory DB.
+      - name: Dependency audit (pip-audit, non-blocking)
+        run: |
+          uv export --frozen --no-emit-project --no-hashes \
+            --format requirements-txt -o requirements.txt
+          uvx pip-audit -r requirements.txt
+        continue-on-error: true
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

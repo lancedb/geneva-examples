@@ -5,16 +5,20 @@ from __future__ import annotations
 import logging
 import time
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from geneva_examples.core.utils.tables import wait_for_columns
+
+if TYPE_CHECKING:
+    from geneva_examples.core._types import ConnectionLike, TableLike
 
 logger = logging.getLogger(__name__)
 
 
 def backfill_column(
     *,
-    conn: object,
-    table: object,
+    conn: ConnectionLike,
+    table: TableLike,
     table_name: str,
     column: str,
     udf: object,
@@ -26,7 +30,7 @@ def backfill_column(
     wait_attempts: int,
     wait_sleep_s: int,
     use_cpu_only_pool: bool = False,
-) -> object:
+) -> TableLike:
     """Drop/add ``column`` backed by ``udf``, wait for it, backfill, and log."""
     try:
         table.drop_columns([column])

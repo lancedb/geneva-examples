@@ -47,6 +47,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# requirements.txt exported by the CI dependency-audit job (uv.lock is the source of truth).
+requirements.txt
+
 # --- Test / coverage / type-check caches ---
 .pytest_cache/
 .tox/
