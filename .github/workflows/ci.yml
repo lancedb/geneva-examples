@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          fetch-depth: 0  # gitleaks scans history
+          fetch-depth: 0  # the secret scan walks git history
 
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -78,13 +78,14 @@ jobs:
           uvx pip-audit -r requirements.txt
         continue-on-error: true
 
-      # Run the gitleaks binary directly: it's MIT-licensed and free, whereas the
-      # gitleaks-action wrapper now requires a paid GITLEAKS_LICENSE for org repos.
-      - name: Secret scan (gitleaks)
+      # Secret scan with TruffleHog (Apache-2.0, fully open source). Run the
+      # binary directly — no Action wrapper, no license — and walk git history,
+      # failing the job only on actively verified secrets to avoid noise.
+      - name: Secret scan (trufflehog)
         env:
-          GITLEAKS_VERSION: 8.30.1
+          TRUFFLEHOG_VERSION: 3.95.6
         run: |
           curl -sSLf \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /tmp gitleaks
-          /tmp/gitleaks git . --redact --no-banner --verbose
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /tmp trufflehog
+          /tmp/trufflehog git file://. --only-verified --fail --no-update
