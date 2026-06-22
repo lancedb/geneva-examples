@@ -19,10 +19,14 @@ from __future__ import annotations
 import os
 import uuid
 
+from geneva_examples.core.package_specs import package_spec
+
 # Geneva remote runtime package pins (env-overridable for targeting other builds).
-GENEVA_PACKAGE_SPEC = os.environ.get("GENEVA_PACKAGE_SPEC", "geneva==0.13.0b18")
-LANCEDB_PACKAGE_SPEC = os.environ.get("LANCEDB_PACKAGE_SPEC", "lancedb==0.33.1b2")
-PYLANCE_PACKAGE_SPEC = os.environ.get("PYLANCE_PACKAGE_SPEC", "pylance==8.0.0b16")
+# geneva/lancedb/pylance track the installed versions so the workers match the
+# client's locked env; the rest stay exact-pinned for reproducible worker builds.
+GENEVA_PACKAGE_SPEC = package_spec("geneva")
+LANCEDB_PACKAGE_SPEC = package_spec("lancedb")
+PYLANCE_PACKAGE_SPEC = package_spec("pylance")
 PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.0")
 PILLOW_PACKAGE_SPEC = os.environ.get("PILLOW_PACKAGE_SPEC", "pillow==12.2.0")
 AV_PACKAGE_SPEC = os.environ.get("AV_PACKAGE_SPEC", "av>=12,<14")
