@@ -6,14 +6,9 @@ requires-python = ">=3.12"
 dependencies = [
     "typer>=0.24.0",
     "pyyaml>=6.0",
-    # Pin the LanceDB stack to the versions the deployed cluster was built
-    # against (client/server must match or declare_table 500s). pylance 8.0.x
-    # lives on the lance-format index (see [tool.uv.sources]). pyarrow/numpy are
-    # left to geneva's own constraints. geneva 0.13.0b17+ adds source_task_size
-    # to chunker-view refresh; b18 requires pylance>=8.0.0b11.
-    "geneva==0.13.0b18",
-    "lancedb==0.33.1b2",
-    "pylance==8.0.0b16",
+    "geneva==0.13.0b20",
+    "lancedb==0.34.0b1",
+    "pylance==8.0.0b19",
     "pyarrow",
     "numpy",
     "pillow>=10",

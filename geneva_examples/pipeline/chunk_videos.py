@@ -50,7 +50,7 @@ def run(
         8, help="Max clip rows per output fragment (commit granularity)."
     ),
     source_task_size: int | None = typer.Option(
-        None,
+        10,
         help="Source video rows per chunker expansion task (geneva default 1024). "
         "Smaller raises parallelism and lowers per-actor memory.",
     ),

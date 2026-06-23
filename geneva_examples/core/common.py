@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 # advisory Ray scheduling reservation, so capping it is safe.
 _MEMORY_MAX_BYTES = 2**31 - 1
 
+# Pass as `storage_options` to `create_table` for any table that will source a
+# chunker materialized view. Stable row IDs survive compaction, so geneva can map
+# clip rows back to source rows on a cross-version refresh; without them, refresh
+# only works against the exact source version the view was created from and a
+# later refresh fails with "chunker materialized views require stable row IDs for
+# cross-version refresh". Create-time only — an existing table can't be retrofitted.
+STABLE_ROW_IDS_STORAGE_OPTIONS = {"new_table_enable_stable_row_ids": "true"}
+
 
 def setup_logging(level: str = "INFO") -> None:
     """Configure root logging once for a CLI invocation."""

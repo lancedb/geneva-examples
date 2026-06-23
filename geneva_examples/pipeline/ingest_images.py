@@ -8,7 +8,11 @@ from pathlib import Path
 
 import typer
 
-from geneva_examples.core.common import connect, setup_logging
+from geneva_examples.core.common import (
+    STABLE_ROW_IDS_STORAGE_OPTIONS,
+    connect,
+    setup_logging,
+)
 from geneva_examples.core.config import load_config
 from geneva_examples.core.utils.retry import retry_io
 
@@ -78,7 +82,11 @@ def run(
 
     table = retry_io(
         "create_table",
-        lambda: conn.create_table(cfg.table_name, data=image_batches[0]),
+        lambda: conn.create_table(
+            cfg.table_name,
+            data=image_batches[0],
+            storage_options=STABLE_ROW_IDS_STORAGE_OPTIONS,
+        ),
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )

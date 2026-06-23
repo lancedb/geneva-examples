@@ -22,7 +22,11 @@ from pathlib import Path
 
 import typer
 
-from geneva_examples.core.common import connect, setup_logging
+from geneva_examples.core.common import (
+    STABLE_ROW_IDS_STORAGE_OPTIONS,
+    connect,
+    setup_logging,
+)
 from geneva_examples.core.config import load_config
 from geneva_examples.core.utils.retry import retry_io
 
@@ -122,7 +126,11 @@ def run(
         if table is None:
             table = retry_io(
                 "create_table",
-                lambda b=norm: conn.create_table(cfg.table_name, data=b),
+                lambda b=norm: conn.create_table(
+                    cfg.table_name,
+                    data=b,
+                    storage_options=STABLE_ROW_IDS_STORAGE_OPTIONS,
+                ),
                 attempts=table_write_retries,
                 sleep_s=table_write_retry_sleep_s,
             )

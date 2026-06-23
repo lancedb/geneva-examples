@@ -60,10 +60,10 @@ def run(
     chunk_seconds: float = typer.Option(1.0, help="Chunk length in seconds."),
     concurrency: int = typer.Option(48, help="Refresh concurrency (tasks in flight)."),
     checkpoint_size: int = typer.Option(
-        32, help="Max clip rows per output fragment (commit granularity)."
+        128, help="Max clip rows per output fragment (commit granularity)."
     ),
     source_task_size: int | None = typer.Option(
-        None,
+        50,
         help="Source video rows per chunker expansion task (geneva default 1024). "
         "Smaller raises parallelism and lowers per-actor memory.",
     ),

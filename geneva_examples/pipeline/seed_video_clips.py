@@ -38,7 +38,12 @@ from pathlib import Path
 
 import typer
 
-from geneva_examples.core.common import connect, memory_request_bytes, setup_logging
+from geneva_examples.core.common import (
+    STABLE_ROW_IDS_STORAGE_OPTIONS,
+    connect,
+    memory_request_bytes,
+    setup_logging,
+)
 from geneva_examples.core.config import load_config
 from geneva_examples.core.utils.retry import retry_io
 from geneva_examples.pipeline.stages._runner import backfill_column
@@ -365,7 +370,11 @@ def run(
         pass
     retry_io(
         "create_skeleton",
-        lambda: conn.create_table(clips_table, data=skeleton),
+        lambda: conn.create_table(
+            clips_table,
+            data=skeleton,
+            storage_options=STABLE_ROW_IDS_STORAGE_OPTIONS,
+        ),
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )
