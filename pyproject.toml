@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
 requires-python = ">=3.12"
 dependencies = [
-    "typer>=0.24.0",
+    "typer>=0.26.7",
     "pyyaml>=6.0",
     # Pin the LanceDB stack to the versions the deployed cluster was built
     # against (client/server must match or declare_table 500s). pylance 8.0.x
@@ -86,7 +86,7 @@ dev = [
     "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.18",
-    "ty>=0.0.50",
+    "ty>=0.0.52",
 ]
 
 [tool.ruff]
