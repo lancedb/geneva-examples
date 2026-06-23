@@ -22,6 +22,43 @@ The UDF bodies are self-contained closures: their imports and helpers are
 nested inside the factory so they ship to the remote Geneva workers via the
 pinned pip manifests and run there. The driver/CLI code stays lightweight.
 
+## Architecture
+
+The CLIs run **on your machine** (the driver). They only submit work: ingest CLIs
+load source data into LanceDB Cloud tables, and stage CLIs submit a Geneva
+*backfill* that runs the UDF closures on **remote Geneva workers** (GPU-backed for
+the model stages). The `stats`/`jobs` CLIs read table and job state over the same
+connection.
+
+```mermaid
+flowchart LR
+  HF[("Hugging Face<br/>images / videos")]
+
+  subgraph driver["Your machine (driver / CLIs)"]
+    ING["ingest-images<br/>ingest-videos"]
+    CHUNK["chunk-videos"]
+    STAGES["lightweight / embed / caption<br/>frame-embed / frame-caption / frame-openpose"]
+    OPS["stats / jobs"]
+  end
+
+  subgraph cloud["LanceDB Cloud + Geneva runtime"]
+    IMAGES[("images")]
+    VIDEOS[("videos")]
+    CLIPS[("video_clips")]
+    WORKERS[["remote workers<br/>run UDF closures (CPU/GPU)"]]
+  end
+
+  HF --> ING
+  ING --> IMAGES
+  ING --> VIDEOS
+  VIDEOS --> CHUNK --> CLIPS
+  STAGES -- "submit backfill" --> WORKERS
+  WORKERS -- "add feature columns" --> IMAGES
+  WORKERS -- "add feature columns" --> CLIPS
+  OPS -. "read state" .-> IMAGES
+  OPS -. "read state" .-> CLIPS
+```
+
 ## Requirements
 
 - Python ≥ 3.12 and [`uv`](https://docs.astral.sh/uv/).
@@ -124,6 +161,29 @@ uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib --host 0.0.0.0
 - It never builds a manifest or submits to the cluster — promoting a finished
   function to a `geneva_examples/udfs/` factory + a stage CLI stays a manual step.
 
+## Troubleshooting & tuning
+
+| Symptom | Where to look |
+| ------- | ------------- |
+| **`config file not found` / `missing required config`** | Copy `config-example.yaml` to `config.yaml` and fill in `lancedb_api_key`, `lancedb_region`, `geneva_host`. There is no env-var fallback. |
+| **`declare_table` 500s / version errors** | The client must match the deployed cluster. Keep the `geneva`/`lancedb`/`pylance` pins in `pyproject.toml` aligned with the cluster build. |
+| **A feature column stays `NULL` after a stage** | The backfill is async. Check it with `uv run jobs` (add `--all` for terminal states). A stage logs `null_<column>` once it returns — a non-zero count means rows were skipped (e.g. unreadable input). |
+| **`required columns not visible`** | `add_columns` hasn't propagated yet. Raise `--schema-wait-attempts` / `--schema-wait-sleep-s` on the stage. |
+| **Job stuck PENDING or running slowly** | Inspect with `uv run jobs`; cancel with `uv run jobs kill <job_id>`. The cluster needs free (GPU) capacity for the embed/caption/openpose stages. |
+| **HF rate limits during ingest** | Set `hf_token` in `config.yaml`. |
+
+Every stage exposes the backfill knobs as CLI options (see `--help`); defaults are
+tuned for the example datasets:
+
+| Option | Default | What it controls |
+| ------ | ------- | ---------------- |
+| `--backfill-concurrency` | 32 | Parallel tasks; raise to use more workers, lower to ease cluster pressure. |
+| `--backfill-task-size` | 256 | Rows per task — the unit of distribution. |
+| `--backfill-checkpoint-size` | 128 | Rows between checkpoints; smaller = more durable, more overhead. |
+| `--backfill-flush-interval-s` | 30 | Max seconds before a partial checkpoint flush. |
+| `--backfill-timeout-min` | 1000 | Per-backfill timeout. |
+| `--use-cpu-only-pool` | on (CPU stages) | Route to the CPU pool; the model stages use the GPU pool. |
+
 ## Development
 
 ```bash
@@ -132,5 +192,7 @@ make check     # lint + format-check + tests (the CI gate)
 make test      # pytest with coverage
 ```
 
-Tests exercise the UDF manifests, the pure helpers, config loading, and the
-`stats`/`jobs` formatting helpers.
+Tests exercise the UDF manifests, the pure helpers, config loading, the
+`stats`/`jobs` formatting helpers, and the stage CLI wiring (mocked). See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow and how to add a new
+UDF or stage.

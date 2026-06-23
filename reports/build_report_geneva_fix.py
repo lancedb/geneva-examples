@@ -2,13 +2,11 @@
 
 import os
 
+from _report_common import register_fonts
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.pdfmetrics import registerFontFamily
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     HRFlowable,
     Paragraph,
@@ -23,19 +21,7 @@ OUT = os.path.join(
     "geneva_chunker_mv_fix.pdf",
 )
 
-_SUP = "/System/Library/Fonts/Supplemental"
-pdfmetrics.registerFont(TTFont("Body", f"{_SUP}/Arial.ttf"))
-pdfmetrics.registerFont(TTFont("Body-Bold", f"{_SUP}/Arial Bold.ttf"))
-pdfmetrics.registerFont(TTFont("Body-Italic", f"{_SUP}/Arial Italic.ttf"))
-pdfmetrics.registerFont(TTFont("Body-BoldItalic", f"{_SUP}/Arial Bold Italic.ttf"))
-pdfmetrics.registerFont(TTFont("Mono", f"{_SUP}/Courier New.ttf"))
-registerFontFamily(
-    "Body",
-    normal="Body",
-    bold="Body-Bold",
-    italic="Body-Italic",
-    boldItalic="Body-BoldItalic",
-)
+register_fonts()
 
 doc = SimpleDocTemplate(
     OUT,

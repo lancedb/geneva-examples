@@ -2,13 +2,11 @@
 
 import os
 
+from _report_common import register_fonts
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.pdfmetrics import registerFontFamily
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     HRFlowable,
     Paragraph,
@@ -24,21 +22,8 @@ OUT = os.path.join(
 )
 
 # Embed real TrueType fonts so the report renders identically in every viewer
-# (non-embedded base-14 Helvetica is substituted inconsistently by some
-# rasterizers). Arial for prose, Courier New for inline identifiers/metrics.
-_SUP = "/System/Library/Fonts/Supplemental"
-pdfmetrics.registerFont(TTFont("Body", f"{_SUP}/Arial.ttf"))
-pdfmetrics.registerFont(TTFont("Body-Bold", f"{_SUP}/Arial Bold.ttf"))
-pdfmetrics.registerFont(TTFont("Body-Italic", f"{_SUP}/Arial Italic.ttf"))
-pdfmetrics.registerFont(TTFont("Body-BoldItalic", f"{_SUP}/Arial Bold Italic.ttf"))
-pdfmetrics.registerFont(TTFont("Mono", f"{_SUP}/Courier New.ttf"))
-registerFontFamily(
-    "Body",
-    normal="Body",
-    bold="Body-Bold",
-    italic="Body-Italic",
-    boldItalic="Body-BoldItalic",
-)
+# (Arial for prose, Courier New for inline identifiers/metrics).
+register_fonts()
 
 doc = SimpleDocTemplate(
     OUT,

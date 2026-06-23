@@ -7,7 +7,15 @@ import io
 from pathlib import Path
 
 import pytest
+from _fakes import install_fake_geneva
 from PIL import Image
+
+
+@pytest.fixture
+def fake_geneva(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock the Geneva cluster boundary for CLI smoke tests (see tests/_fakes.py)."""
+    install_fake_geneva(monkeypatch)
+
 
 IMAGE_COLORS = [(220, 40, 40), (40, 180, 90), (60, 90, 220)]
 
