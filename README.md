@@ -127,6 +127,82 @@ dataset, plus `seed-video-clips` for load-testing the frame stages without a ful
 chunk run. Run any CLI with `--help` for its options (e.g. `--chunk-seconds`,
 `--model-name`/`--pretrained`/`--dim` on `frame-embed`).
 
+## Streaming ingest
+
+For a **large** dataset on a `db://` enterprise connection, the naive one-shot
+load dies after ~1h with S3 `ExpiredToken`:
+
+```python
+# Anti-pattern: one Arrow dataset over the whole repo, one long write.
+staged = ds.dataset("~/datacomp_meta", format="parquet")  # ~3TB metadata
+tbl.add(staged)   # single Lance write outlives the vended STS token -> ExpiredToken
+```
+
+The table is opened once, the vended STS credentials are baked into the Lance
+backend, and that single write can't finish inside the token's lifetime.
+`ingest-hf-streaming` is the copy-pasteable mitigation: it **streams the source
+in `--chunk-rows` batches** (so no single write outlives the TTL) and **re-vends
+fresh credentials before every chunk** (so late chunks never use a stale token).
+
+```bash
+# zero-config demo (datasets mode, small public text set)
+uv run ingest-hf-streaming --limit 1000 --chunk-rows 200
+
+# scale path: stream datacomp_xlarge parquet metadata straight from hf://
+# (no local download) into a db:// table, re-vending creds every chunk.
+HF_TOKEN=... uv run ingest-hf-streaming \
+    --source-mode parquet --hf-dataset mlfoundations/datacomp_xlarge \
+    --db-uri db://training-playbook --table-name datacomp_xlarge \
+    --chunk-rows 50000 --revend-mode connect
+
+# restart a failed load: skip rows already written, append the rest
+uv run ingest-hf-streaming --resume --no-overwrite --table-name datacomp_xlarge ...
+```
+
+### Options
+
+Run `uv run ingest-hf-streaming --help` for the live list. All options:
+
+| Option | Default | Description |
+| ------ | ------- | ----------- |
+| `--config` | `./config.yaml` | Path to the config YAML. |
+| `--log-level` | `INFO` | Python logging level (`DEBUG`/`INFO`/`WARNING`/…). |
+| `--db-uri` | config `db_uri` | Override the database URI (e.g. `db://training-playbook` or a local path). |
+| `--table-name` | config `table_name` | Override the target table name. |
+| `--hf-dataset` | `cornell-movie-review-data/rotten_tomatoes` | Hugging Face dataset, as a `namespace/name` repo id. |
+| `--hf-split` | `train` | Dataset split — **datasets mode only**; parquet mode reads every shard. |
+| `--limit` | _none (whole dataset)_ | Cap on total **source** rows ingested. Counts skipped rows too, so resuming a `--limit N` load tops the table up to `N` total. |
+| `--chunk-rows` | `50000` | Bounded sub-write size: rows per `append`. Size it so each append finishes well under the STS TTL. |
+| `--source-mode` | `datasets` | Source reader — `datasets` or `parquet` (see below). |
+| `--revend-mode` | `connect` | Per-chunk credential re-vend lever — `connect`, `reopen`, or `latest` (see below). |
+| `--overwrite` / `--no-overwrite` | `--overwrite` | Drop the table first if it exists. Mutually exclusive with `--resume`. |
+| `--resume` / `--no-resume` | `--no-resume` | Skip rows already in the table and append the rest. Requires `--no-overwrite`. |
+| `--table-write-retries` | `5` | Attempts for each create/add op. |
+| `--table-write-retry-sleep-s` | `2.0` | Base sleep (seconds) between retries; backoff is linear (`sleep × attempt`). |
+
+For gated datasets, set `hf_token` in `config.yaml` (exported to `HF_TOKEN`) or
+pass `HF_TOKEN=...` in the environment.
+
+**`--source-mode`**
+
+| Value | Behavior |
+| ----- | -------- |
+| `datasets` (default) | `load_dataset(..., streaming=True)` buffered into batches. Works for any `datasets`-streamable repo whose columns are Arrow-serializable scalars (text/metadata). Honors `--hf-split`. Decode-heavy feature types (PIL images, audio) are out of scope. |
+| `parquet` | Streams parquet straight from `hf://` via `HfFileSystem` + `pyarrow.dataset` — exact schema, no decode, no full download. Scales to datacomp-style sharded metadata. Reads **all** `*.parquet` in the repo (ignores `--hf-split`). |
+
+**`--revend-mode`** — each chunk logs the vended `aws_session_token` prefix
+(`token=...`) so you can confirm credentials actually rotate.
+
+| Value | Behavior |
+| ----- | -------- |
+| `connect` (default) | Reconstructs the connection (`geneva.connect`) before each chunk → fresh namespace client → fresh `describe_table` vend. The only lever **guaranteed** to re-vend. |
+| `reopen` | Reuses the connection and re-opens the table (`conn.open_table`) per chunk. Lighter, but whether it re-vends happens inside opaque native code and is unconfirmed. |
+| `latest` | Holds one table and refreshes its credentials in place via the underlying `latest_storage_options()` vend primitive (a private, internal lancedb API). |
+
+> **Tuning `--chunk-rows`.** 50k metadata rows finishes far inside a ~1h STS TTL.
+> For wide rows or rows carrying blobs, lower it so each append stays comfortably
+> under the TTL.
+
 ## Inspecting state
 
 ```bash

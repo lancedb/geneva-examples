@@ -33,6 +33,7 @@ dependencies = [
 
 [project.scripts]
 ingest-images = "geneva_examples.pipeline.ingest_images:app"
+ingest-hf-streaming = "geneva_examples.pipeline.ingest_hf_streaming:app"
 ingest-videos = "geneva_examples.pipeline.ingest_videos:app"
 ingest-videos-openvid = "geneva_examples.pipeline.ingest_videos_openvid:app"
 chunk-videos = "geneva_examples.pipeline.chunk_videos:app"
@@ -141,6 +142,7 @@ source = ["geneva_examples"]
 omit = [
     # Pipeline CLIs (open a cluster connection). _runner.py is fully tested -> kept in.
     "geneva_examples/pipeline/ingest_images.py",
+    "geneva_examples/pipeline/ingest_hf_streaming.py",
     "geneva_examples/pipeline/ingest_videos.py",
     "geneva_examples/pipeline/ingest_videos_openvid.py",
     "geneva_examples/pipeline/chunk_videos.py",
