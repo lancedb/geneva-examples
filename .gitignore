@@ -3,6 +3,8 @@
 config.yaml
 # local MP4 download cache (ingest-videos)
 video_cache/
+# Hugging Face cache (HF_HOME for ingest-images / ingest-hf-streaming)
+huggingface_cache/
 
 # UDF Studio sample data: keep the directory layout, ignore user-provided media.
 studio_data/images/*
