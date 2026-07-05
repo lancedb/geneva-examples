@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
 requires-python = ">=3.12"
 dependencies = [
-    "typer>=0.24.0",
+    "typer>=0.26.8",
     "pyyaml>=6.0",
     # Pin the LanceDB stack to the versions the deployed cluster was built
     # against (client/server must match or declare_table 500s). pylance 8.0.x
@@ -16,16 +16,16 @@ dependencies = [
     "pylance==8.0.0b16",
     "pyarrow",
     "numpy",
-    "pillow>=10",
+    "pillow>=12.3.0",
     "torch>=2.2",
     "open-clip-torch>=2.24",
-    "transformers>=4.40",
+    "transformers>=5.13.0",
     "datasets>=3.0.0",
     # Explicit (already transitive via datasets): enables the `hf://datasets/...`
     # connect URI used by the OpenVid ingest CLI.
     "huggingface-hub>=0.24",
     # PyAV: video demux/transcode for chunk_videos.py and seed_video_clips.py.
-    "av>=13",
+    "av>=18.0.0",
     # UDF Studio: in-browser Gradio sandbox for prototyping UDFs/chunkers.
     # >=4.44 for gr.Timer.
     "gradio>=4.44",
@@ -85,8 +85,8 @@ dev = [
     "pre-commit>=4.6.0",
     "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.18",
-    "ty>=0.0.50",
+    "ruff>=0.15.20",
+    "ty>=0.0.56",
 ]
 
 [tool.ruff]
