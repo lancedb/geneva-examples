@@ -57,3 +57,22 @@ def test_stage_cli_wires_backfill(
     # Every expected feature column was added and backfilled via the shared runner.
     assert set(table.added) == expected
     assert set(table.backfilled) == expected
+
+
+def test_pdf_chunk_stage_wires_backfill(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The PDF stage reuses the *real* geneva.udfs.document UDFs (building a pip
+    # manifest is local, no cluster), so it can't use the fake-geneva harness
+    # above — drive it with real geneva but the connection boundary mocked.
+    mod = importlib.import_module("geneva_examples.pipeline.stages.pdf_chunks")
+    table = FakeTable(names=["doc_id", "pdf_bytes"])
+
+    cfg = types.SimpleNamespace(db_uri="db://test", table_name="pdfs")
+    monkeypatch.setattr(mod, "load_config", lambda _config: cfg)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: FakeConn(table=table))
+
+    result = CliRunner().invoke(mod.app, ["--schema-wait-sleep-s", "0"])
+
+    assert result.exit_code == 0, result.output
+    # `pages` then `chunks` are both added and backfilled, in that order.
+    assert list(table.added) == ["pages", "chunks"]
+    assert table.backfilled == ["pages", "chunks"]

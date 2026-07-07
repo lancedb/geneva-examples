@@ -1,8 +1,9 @@
 """Cleanup CLI: drop the video + clips tables (and their MV siblings).
 
 Drops ``videos`` and ``video_clips`` plus their transient ``<name>_mv``
-materialized views, so you can start a fresh ingest/chunk run. Prompts for
-confirmation unless ``--yes`` is passed.
+materialized views (and, with ``--pdfs-table``, the ``pdfs`` table), so you can
+start a fresh ingest/chunk run. Prompts for confirmation unless ``--yes`` is
+passed.
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ def run(
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     videos_table: str = typer.Option("videos", help="Videos table to drop."),
     clips_table: str = typer.Option("video_clips", help="Clips table to drop."),
+    pdfs_table: str | None = typer.Option(
+        None, help="Also drop this PDFs table (e.g. 'pdfs')."
+    ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip the confirmation prompt."
     ),
@@ -41,13 +45,16 @@ def run(
         cfg.db_uri = db_uri
 
     # Preserve order while de-duplicating (e.g. if videos_table == clips_table).
-    targets: list[str] = []
-    for name in (
+    candidates = [
         videos_table,
         f"{videos_table}_mv",
         clips_table,
         f"{clips_table}_mv",
-    ):
+    ]
+    if pdfs_table:
+        candidates.append(pdfs_table)
+    targets: list[str] = []
+    for name in candidates:
         if name not in targets:
             targets.append(name)
 

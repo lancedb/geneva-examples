@@ -12,6 +12,8 @@ What's here:
    - `blip` — BLIP image captions
    - `openpose` — OpenPose pose-skeleton PNGs
    - `chunkers` — video-chunking UDTFs (split videos into fixed-length clips)
+   - `pdf` — PDF page/text-chunk extraction, reusing Geneva's pre-built
+     `geneva.udfs.document` UDFs (`extract_pages` + `chunk_pages`)
 2. **Pipeline CLIs** that ingest data and submit the UDFs as Geneva backfills.
 3. **Two inspection CLIs** — `stats` and `jobs` — that read table/job state over
    the same connection.
@@ -127,6 +129,24 @@ dataset, plus `seed-video-clips` for load-testing the frame stages without a ful
 chunk run. Run any CLI with `--help` for its options (e.g. `--chunk-seconds`,
 `--model-name`/`--pretrained`/`--dim` on `frame-embed`).
 
+## PDF workflow
+
+Extract text chunks from your own PDFs. `ingest-pdfs` loads every `*.pdf` under
+`--pdf-dir` into a `pdfs` table (`doc_id` + `pdf_bytes`); `chunk-pdfs` then
+backfills two nested-list columns using Geneva's pre-built
+`geneva.udfs.document` UDFs — `pages` (per-page text via `pypdf`) and `chunks`
+(overlapping windows via LangChain's `RecursiveCharacterTextSplitter`, 2048
+chars / 200 overlap). Both stages run on the **CPU** pool.
+
+```bash
+uv run ingest-pdfs --pdf-dir ~/my-pdfs   # load PDFs into the `pdfs` table
+uv run chunk-pdfs                        # backfill `pages` + `chunks` (CPU)
+```
+
+Each PDF stays one row, carrying its `pages`/`chunks` lists — ready to embed or
+explode into a per-chunk table. Prototype a PDF function first in UDF Studio
+(the `pdf` modality, below) before wiring in a stage.
+
 ## Inspecting state
 
 ```bash
@@ -153,9 +173,9 @@ uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib --host 0.0.0.0
   chunker defines `chunk(value)` that yields one `dict` per output row. Code at
   module level runs once per Run, so load models there.
 - **Sample data** comes from `--data-dir` (default `studio_data/`): drop files
-  into `images/`, `videos/`, `audio/`, or rows into `input.csv` (text). See
-  [`studio_data/README.md`](studio_data/README.md). The sample media itself is
-  gitignored — add your own.
+  into `images/`, `videos/`, `audio/`, `pdfs/`, or rows into `input.csv` (text).
+  See [`studio_data/README.md`](studio_data/README.md). The sample media itself
+  is gitignored — add your own.
 - **Library.** Save/load work-in-progress to a local LanceDB at `--library`
   (default `udf_library/`).
 - It never builds a manifest or submits to the cluster — promoting a finished

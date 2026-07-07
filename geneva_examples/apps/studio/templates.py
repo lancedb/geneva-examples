@@ -140,6 +140,62 @@ TEMPLATES: dict[str, dict] = {
             '''
         ).strip(),
     },
+    "pdf · page + word count": {
+        "kind": "udf",
+        "modality": "pdf",
+        "code": dedent(
+            '''
+            """UDF: extract a PDF's text and return its page + word counts."""
+
+            def transform(pdf_bytes):
+                import io
+                import pypdf
+
+                reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+                words = sum(len((p.extract_text() or "").split()) for p in reader.pages)
+                return {"pages": len(reader.pages), "words": words}
+            '''
+        ).strip(),
+    },
+    "pdf · text chunker": {
+        "kind": "chunker",
+        "modality": "pdf",
+        "code": dedent(
+            '''
+            """Chunker: extract PDF text and split it into overlapping chunks.
+
+            Mirrors the production path (geneva.udfs.document.pdf_embedding, reused
+            in geneva_examples/udfs/pdf.py): pypdf per-page text -> LangChain
+            RecursiveCharacterTextSplitter -> one row per chunk. The production
+            UDFs keep chunks as a nested list per PDF row; here we yield one row
+            per chunk so you can eyeball each one.
+            """
+            import io
+            import pypdf
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+            CHUNK_SIZE = 2048
+            CHUNK_OVERLAP = 200
+
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
+            )
+
+            def chunk(pdf_bytes):
+                reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+                for page_number, page in enumerate(reader.pages):
+                    text = page.extract_text()
+                    if not text:
+                        continue
+                    for chunk_id, piece in enumerate(splitter.split_text(text)):
+                        yield {
+                            "page_number": page_number,
+                            "chunk_id": chunk_id,
+                            "chunk": piece,
+                        }
+            '''
+        ).strip(),
+    },
 }
 
 DEFAULT_TEMPLATE = "image · dimensions (w×h)"

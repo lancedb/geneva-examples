@@ -46,11 +46,45 @@ def make_mp4(seconds: float = 3.0, fps: int = 10) -> bytes:
     return buf.getvalue()
 
 
+def make_pdf(text: str = "Hello chunker world") -> bytes:
+    """Build a tiny single-page PDF whose one text run is ``text``.
+
+    Hand-assembled with a correct xref table (computed byte offsets) so pypdf
+    parses it and ``extract_text()`` returns ``text`` — enough to exercise the
+    reused ``extract_pages`` / ``chunk_pages`` UDFs without reportlab.
+    """
+    stream = b"BT /F1 24 Tf 40 150 Td (" + text.encode("latin-1") + b") Tj ET"
+    objs = [
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Contents 4 0 R"
+        b"/Resources<</Font<</F1 5 0 R>>>>>>",
+        b"<</Length "
+        + str(len(stream)).encode()
+        + b">>stream\n"
+        + stream
+        + b"\nendstream",
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += str(i).encode() + b" 0 obj" + body + b"endobj\n"
+    xref_pos = len(out)
+    out += b"xref\n0 " + str(len(objs) + 1).encode() + b"\n0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += b"trailer<</Size " + str(len(objs) + 1).encode() + b"/Root 1 0 R>>\n"
+    out += b"startxref\n" + str(xref_pos).encode() + b"\n%%EOF"
+    return bytes(out)
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """A studio_data-shaped directory: images/, videos/, audio/, input.csv."""
+    """A studio_data-shaped dir: images/, videos/, audio/, pdfs/, input.csv."""
     root = tmp_path / "data"
-    for sub in ("images", "videos", "audio"):
+    for sub in ("images", "videos", "audio", "pdfs"):
         (root / sub).mkdir(parents=True)
 
     for i, color in enumerate(IMAGE_COLORS):
@@ -59,6 +93,11 @@ def data_dir(tmp_path: Path) -> Path:
         )
     # A non-image file that extension filtering must skip.
     (root / "images" / "notes.txt").write_text("not an image")
+
+    for i in range(2):
+        (root / "pdfs" / f"doc_{i}.pdf").write_bytes(make_pdf(f"page text {i}"))
+    # A non-pdf file that extension filtering must skip.
+    (root / "pdfs" / "notes.txt").write_text("not a pdf")
 
     with (root / "input.csv").open("w", newline="") as f:
         writer = csv.writer(f)
@@ -78,6 +117,12 @@ def library_path(tmp_path: Path) -> Path:
 def mp4_bytes() -> bytes:
     """A tiny 3-second in-memory mp4 for the video chunker."""
     return make_mp4(seconds=3.0, fps=10)
+
+
+@pytest.fixture
+def pdf_bytes() -> bytes:
+    """A tiny single-page text PDF for the PDF extract/chunk UDFs."""
+    return make_pdf("the quick brown fox jumps over the lazy dog")
 
 
 @pytest.fixture

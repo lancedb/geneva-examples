@@ -3,11 +3,14 @@
 config.yaml
 # local MP4 download cache (ingest-videos)
 video_cache/
+# local PDF ingest directory (ingest-pdfs --pdf-dir default)
+pdf_data/
 
 # UDF Studio sample data: keep the directory layout, ignore user-provided media.
 studio_data/images/*
 studio_data/videos/*
 studio_data/audio/*
+studio_data/pdfs/*
 !studio_data/**/.gitkeep
 
 # UDF Studio local LanceDB library of saved work-in-progress functions.

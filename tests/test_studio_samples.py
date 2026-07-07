@@ -22,6 +22,15 @@ def test_sample_respects_n(data_dir: Path):
     assert len(samples.sample(data_dir, "image", n=2)["values"]) == 2
 
 
+def test_sample_pdfs_reads_bytes_and_filters_extensions(data_dir: Path):
+    res = samples.sample(data_dir, "pdf", n=10)
+    # notes.txt is excluded; the two PDFs come back as bytes, sorted by name.
+    assert res["labels"] == ["doc_0.pdf", "doc_1.pdf"]
+    assert all(isinstance(v, bytes) and v.startswith(b"%PDF") for v in res["values"])
+    assert res["modality"] == "pdf"
+    assert "pdfs/" in res["detail"]
+
+
 def test_sample_text_named_column(data_dir: Path):
     res = samples.sample(data_dir, "text", n=5, csv_column="text")
     assert res["values"] == ["hello world", "the quick brown fox"]
@@ -72,4 +81,4 @@ def test_sample_text_empty_csv_has_no_columns(tmp_path: Path):
 
 
 def test_modalities_constant():
-    assert samples.MODALITIES == ["image", "video", "audio", "text"]
+    assert samples.MODALITIES == ["image", "video", "audio", "text", "pdf"]
