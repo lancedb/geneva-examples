@@ -26,6 +26,11 @@ dependencies = [
     "huggingface-hub>=0.24",
     # PyAV: video demux/transcode for chunk_videos.py and seed_video_clips.py.
     "av>=13",
+    # PDF workflow: pypdf extracts page text, langchain-text-splitters chunks it.
+    # These back geneva.udfs.document.{extract_pages,chunk_pages}, reused by the
+    # chunk-pdfs stage and the UDF Studio pdf templates (local execution).
+    "pypdf>=5,<6",
+    "langchain-text-splitters>=0.3,<0.4",
     # UDF Studio: in-browser Gradio sandbox for prototyping UDFs/chunkers.
     # >=4.44 for gr.Timer.
     "gradio>=4.44",
@@ -35,8 +40,10 @@ dependencies = [
 ingest-images = "geneva_examples.pipeline.ingest_images:app"
 ingest-videos = "geneva_examples.pipeline.ingest_videos:app"
 ingest-videos-openvid = "geneva_examples.pipeline.ingest_videos_openvid:app"
+ingest-pdfs = "geneva_examples.pipeline.ingest_pdfs:app"
 chunk-videos = "geneva_examples.pipeline.chunk_videos:app"
 chunk-videos-openvid = "geneva_examples.pipeline.chunk_videos_openvid:app"
+chunk-pdfs = "geneva_examples.pipeline.stages.pdf_chunks:app"
 seed-video-clips = "geneva_examples.pipeline.seed_video_clips:app"
 cleanup = "geneva_examples.pipeline.cleanup:app"
 lightweight = "geneva_examples.pipeline.stages.lightweight:app"
@@ -143,6 +150,7 @@ omit = [
     "geneva_examples/pipeline/ingest_images.py",
     "geneva_examples/pipeline/ingest_videos.py",
     "geneva_examples/pipeline/ingest_videos_openvid.py",
+    "geneva_examples/pipeline/ingest_pdfs.py",
     "geneva_examples/pipeline/chunk_videos.py",
     "geneva_examples/pipeline/chunk_videos_openvid.py",
     "geneva_examples/pipeline/seed_video_clips.py",
@@ -153,6 +161,7 @@ omit = [
     "geneva_examples/pipeline/stages/frame_embed.py",
     "geneva_examples/pipeline/stages/frame_caption.py",
     "geneva_examples/pipeline/stages/frame_openpose.py",
+    "geneva_examples/pipeline/stages/pdf_chunks.py",
     # Ops CLIs: dominated by cluster/HTTP command bodies.
     "geneva_examples/ops/*",
     # Gradio UI wiring (event handlers need a browser runtime). The studio

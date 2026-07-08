@@ -13,6 +13,7 @@ import importlib
 import pytest
 
 from geneva_examples.udfs import blip, chunkers, clip, imageinfo, openpose
+from geneva_examples.udfs import pdf as pdf_udfs
 
 
 def test_file_size_udf_runs():
@@ -35,6 +36,7 @@ def test_dimensions_udf_runs(make_png_bytes):
         (blip.BLIP_RUNTIME_PIP, "transformers"),
         (openpose.OPENPOSE_RUNTIME_PIP, "controlnet"),
         (chunkers.VIDEO_RUNTIME_PIP, "av"),
+        (pdf_udfs.PDF_RUNTIME_PIP, "pypdf"),
     ],
 )
 def test_runtime_pip_lists_are_well_formed(runtime_pip, expected_substr):
@@ -82,6 +84,43 @@ def test_chunk_video_udtf_respects_max_video_s(mp4_bytes):
     # The synth clip is ~3s; a 1s ceiling skips it entirely.
     udtf = chunkers.chunk_video_udtf(chunk_seconds=1.0, manifest=None, max_video_s=1.0)
     assert list(udtf.func(mp4_bytes)) == []
+
+
+def test_pdf_factories_reuse_geneva_udfs_with_manifest():
+    # The factories wrap geneva.udfs.document UDFs, attaching this repo's
+    # manifest while preserving the parameter-name-inferred input columns.
+    from geneva.manifest import GenevaManifest
+
+    manifest = (
+        GenevaManifest.create_pip("pdf-test").pip(pdf_udfs.PDF_RUNTIME_PIP).build()
+    )
+    extract = pdf_udfs.build_extract_pages_udf(manifest=manifest)
+    chunk = pdf_udfs.build_chunk_pages_udf(manifest=manifest)
+    assert extract.input_columns == ["pdf_bytes"]
+    assert chunk.input_columns == ["pages"]
+    assert extract.manifest is manifest
+    assert chunk.manifest is manifest
+    # Fresh versions each build so re-runs re-materialize the columns.
+    assert (
+        extract.version != pdf_udfs.build_extract_pages_udf(manifest=manifest).version
+    )
+
+
+def test_pdf_extract_then_chunk_runs_on_real_pdf(pdf_bytes):
+    # extract_pages -> chunk_pages chains on the driver (pypdf + langchain).
+    pages = pdf_udfs.build_extract_pages_udf(manifest=None).func(pdf_bytes)
+    assert pages == [
+        {"page_number": 0, "text": "the quick brown fox jumps over the lazy dog"}
+    ]
+    chunks = pdf_udfs.build_chunk_pages_udf(manifest=None).func(pages)
+    assert len(chunks) == 1
+    assert set(chunks[0]) == {"page_number", "chunk_id", "chunk"}
+    assert chunks[0]["chunk"] == "the quick brown fox jumps over the lazy dog"
+
+
+def test_pdf_extract_handles_empty():
+    assert pdf_udfs.build_extract_pages_udf(manifest=None).func(None) is None
+    assert pdf_udfs.build_chunk_pages_udf(manifest=None).func(None) is None
 
 
 def test_chunk_blob_video_udtf_reads_from_lance(tmp_path, mp4_bytes):

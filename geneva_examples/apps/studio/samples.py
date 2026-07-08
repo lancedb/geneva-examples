@@ -7,6 +7,7 @@ without touching a cluster:
       images/      image files  -> each sample is the file's raw bytes
       videos/      video files  -> each sample is the file's raw bytes
       audio/       audio files  -> each sample is the file's raw bytes
+      pdfs/        pdf files    -> each sample is the file's raw bytes
       input.csv    text rows    -> each sample is a cell from a chosen column
 
 See ``studio_data/README.md`` for the layout shipped with the repo.
@@ -17,8 +18,13 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-MODALITIES = ["image", "video", "audio", "text"]
-MODALITY_SUBDIR = {"image": "images", "video": "videos", "audio": "audio"}
+MODALITIES = ["image", "video", "audio", "text", "pdf"]
+MODALITY_SUBDIR = {
+    "image": "images",
+    "video": "videos",
+    "audio": "audio",
+    "pdf": "pdfs",
+}
 TEXT_CSV = "input.csv"
 
 # Recognized extensions per modality. If a folder has none of these but does
@@ -27,6 +33,7 @@ _EXTS = {
     "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"},
     "video": {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"},
     "audio": {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"},
+    "pdf": {".pdf"},
 }
 
 

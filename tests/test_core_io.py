@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
+import pytest
 from PIL import Image
 
-from geneva_examples.core.utils import images, videos
+from geneva_examples.core.utils import images, pdfs, videos
 
 
 # --------------------------------------------------------------------------- #
@@ -185,3 +186,42 @@ def test_normalize_openvid_casts_embedding_dtype():
 def test_openvid_source_columns_constant():
     assert videos.OPENVID_SOURCE_COLUMNS[0] == "video_path"
     assert "video_blob" in videos.OPENVID_SOURCE_COLUMNS
+
+
+# --------------------------------------------------------------------------- #
+# pdfs.py — local PDF ingest helper
+# --------------------------------------------------------------------------- #
+def test_load_pdf_batches_reads_dir_and_filters(tmp_path: Path):
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-a")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-b")
+    (tmp_path / "notes.txt").write_text("skip me")  # non-pdf filtered out
+    batches = pdfs.load_pdf_batches(tmp_path, frag_size=1)
+    assert [b.num_rows for b in batches] == [1, 1]  # one PDF per fragment
+    rows = [r for b in batches for r in b.to_pylist()]
+    assert [r["doc_id"] for r in rows] == ["a", "b"]  # sorted by name, stem as id
+    assert rows[0]["pdf_bytes"] == b"%PDF-a"
+
+
+def test_load_pdf_batches_fragments(tmp_path: Path):
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        (tmp_path / name).write_bytes(b"%PDF-" + name.encode())
+    batches = pdfs.load_pdf_batches(tmp_path, frag_size=2)
+    assert [b.num_rows for b in batches] == [2, 1]  # 3 rows, frag_size 2
+    ids = [r["doc_id"] for b in batches for r in b.to_pylist()]
+    assert ids == ["a", "b", "c"]
+
+
+def test_load_pdf_batches_schema():
+    batch = pdfs._to_batch([{"doc_id": "d", "pdf_bytes": b"x"}])
+    assert batch.schema.field("pdf_bytes").type == pa.large_binary()
+    assert batch.schema.field("doc_id").type == pa.string()
+
+
+def test_load_pdf_batches_missing_dir_raises(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        pdfs.load_pdf_batches(tmp_path / "nope")
+
+
+def test_load_pdf_batches_empty_dir_raises(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        pdfs.load_pdf_batches(tmp_path)
