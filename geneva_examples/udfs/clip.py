@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -37,7 +38,7 @@ CLIP_RUNTIME_PIP = [
 def build_clip_embedding_udf(
     *,
     input_column: str,
-    manifest: object,
+    manifest: Any,
     batch_size: int = 256,
     num_workers: int = 8,
     num_cpus: float = 4.0,
@@ -147,12 +148,12 @@ def build_clip_embedding_udf(
                 def __len__(self):
                     return len(self.arr)
 
-                def __getitem__(self, i):
+                def __getitem__(self, i):  # ty: ignore[invalid-method-override]  # third-party stub gap
                     raw = self.arr[i].as_buffer().to_pybytes()
                     img = Image.open(io.BytesIO(raw)).convert("RGB")
                     return preprocess(img)
 
-            loader_kwargs = dict(
+            loader_kwargs: dict[str, Any] = dict(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 pin_memory=(self.device == "cuda"),

@@ -23,7 +23,7 @@ def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
     log_level: str = typer.Option("INFO", help="Logging level."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str | None = typer.Option(None, help="Override config table_name."),
+    table_name: str = typer.Option("images", help="Table to operate on."),
     query_text: str = typer.Option(
         "a golden retriever", help="Text query for the embedding search demo."
     ),
@@ -39,6 +39,12 @@ def run(
     flush_interval_s: float = typer.Option(30.0, help="Checkpoint flush interval (s)."),
     schema_wait_attempts: int = typer.Option(30, help="Schema-visibility attempts."),
     schema_wait_sleep_s: int = typer.Option(2, help="Seconds between schema checks."),
+    search_demo: bool = typer.Option(
+        True,
+        "--search-demo/--no-search-demo",
+        help="After backfill, run a local text->image search demo "
+        "(needs open_clip + torch on the driver; --no-search-demo skips it).",
+    ),
 ) -> None:
     """Add an OpenCLIP `embedding` column to the configured table."""
     setup_logging(log_level)
@@ -52,15 +58,13 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    if table_name:
-        cfg.table_name = table_name
     resolved_gpus = num_gpus if num_gpus is not None else 1.0
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info("db_uri %s table %s", cfg.db_uri, cfg.table_name)
+    logger.info("db_uri %s table %s", cfg.db_uri, table_name)
 
     conn = connect(cfg)
-    table = conn.open_table(cfg.table_name)
+    table = conn.open_table(table_name)
 
     manifest = (
         GenevaManifest.create_pip(f"embed-{uuid.uuid4().hex[:6]}")
@@ -81,7 +85,7 @@ def run(
     table = backfill_column(
         conn=conn,
         table=table,
-        table_name=cfg.table_name,
+        table_name=table_name,
         column="embedding",
         udf=udf,
         concurrency=concurrency,
@@ -93,26 +97,34 @@ def run(
         wait_sleep_s=schema_wait_sleep_s,
     )
 
-    import open_clip
-    import torch
+    # Local text->image search demo. Gated behind --search-demo because it
+    # imports open_clip + torch and downloads model weights on the driver — the
+    # backfill itself runs those remotely, so the stage works without them.
+    if search_demo:
+        import open_clip
+        import torch
 
-    model, _, _ = open_clip.create_model_and_transforms(
-        "ViT-B-32", pretrained="laion2b_s34b_b79k"
-    )
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device).eval()
-    tokens = tokenizer([query_text]).to(device)
-    with torch.no_grad():
-        query_emb = model.encode_text(tokens)
-        query_emb /= query_emb.norm(dim=-1, keepdim=True)
-    query_vec = query_emb.squeeze().cpu().numpy().astype(float).tolist()
-    rows = table.search(query_vec, "embedding").limit(5).to_list()
-    logger.info("embedding_query %s matches %s", query_text, len(rows))
-    logger.info(
-        "embedding_sample %s",
-        [{"image_id": r.get("image_id"), "label": r.get("label")} for r in rows[:5]],
-    )
+        model, _, _ = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="laion2b_s34b_b79k"
+        )
+        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device).eval()
+        tokens = tokenizer([query_text]).to(device)
+        with torch.no_grad():
+            query_emb = model.encode_text(tokens)
+            query_emb /= query_emb.norm(dim=-1, keepdim=True)
+        query_vec = query_emb.squeeze().cpu().numpy().astype(float).tolist()
+        rows = table.search(query_vec, "embedding").limit(5).to_list()
+        logger.info("embedding_query %s matches %s", query_text, len(rows))
+        logger.info(
+            "embedding_sample %s",
+            [
+                {"image_id": r.get("image_id"), "label": r.get("label")}
+                for r in rows[:5]
+            ],
+        )
+
     logger.info("embeddings_ok")
 
 

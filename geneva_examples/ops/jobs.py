@@ -7,11 +7,12 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 
 from geneva_examples.core.common import connect, setup_logging
-from geneva_examples.core.config import load_config
+from geneva_examples.core.config import Config, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,9 @@ _ALL_STATUSES = ["PENDING", "RUNNING", "DONE", "FAILED", "CANCELLED"]
 _TERMINAL = {"DONE", "FAILED", "CANCELLED"}
 
 
-def _open_connection(config: Path | None, db_uri: str | None, log_level: str) -> object:
+def _open_connection(
+    config: Path | None, db_uri: str | None, log_level: str
+) -> tuple[Config, Any]:
     """Resolve config, apply ``db_uri`` override, and open a Geneva connection."""
     setup_logging(log_level)
 
@@ -39,7 +42,7 @@ def _status(jr: object) -> str:
     return getattr(s, "value", str(s))
 
 
-def _list_jobs(conn: object, table: str | None, statuses: list[str]) -> list:
+def _list_jobs(conn: Any, table: str | None, statuses: list[str]) -> list:
     """Union jobs across statuses.
 
     geneva's ``list_jobs`` builds an empty ``WHERE`` clause (invalid SQL) when no
@@ -295,7 +298,21 @@ def kill(
     if not yes:
         typer.confirm(f"Cancel {status} job {job_id} ({target})?", abort=True)
 
-    conn._history.set_completed(job_id, status="CANCELLED")
+    # geneva exposes no public cancel API, so we flip the job record via the
+    # private history table. Guard the access: if a geneva pin bump renames or
+    # removes it, fail with a clear message instead of a raw AttributeError.
+    set_completed = getattr(getattr(conn, "_history", None), "set_completed", None)
+    if not callable(set_completed):
+        typer.secho(
+            "this geneva build does not expose the private jobs-history API "
+            "(conn._history.set_completed) that `kill` relies on; the geneva pin "
+            "may have changed. Cannot cancel from the client.",
+            fg="red",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    set_completed(job_id, status="CANCELLED")
     typer.secho(f"marked job {job_id} CANCELLED", fg="yellow")
     _print_detail(conn.get_job(job_id))
 

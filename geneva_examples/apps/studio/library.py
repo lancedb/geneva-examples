@@ -44,9 +44,15 @@ def save_udf(
     }
     db = _db(library_path)
     if TABLE in db.list_tables().tables:
-        tbl = db.open_table(TABLE)
-        tbl.delete(f"name = '{_escape(name)}'")  # overwrite-by-name
-        tbl.add([row])
+        # Atomic upsert-by-name: unlike a separate delete()+add(), a crash can't
+        # leave the row deleted-but-not-re-added.
+        (
+            db.open_table(TABLE)
+            .merge_insert("name")
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute([row])
+        )
     else:
         db.create_table(TABLE, data=[row])
     return row

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -34,7 +35,7 @@ BLIP_RUNTIME_PIP = [
 def build_blip_caption_udf(
     *,
     input_column: str,
-    manifest: object,
+    manifest: Any,
     batch_size: int = 256,
     num_workers: int = 8,
     num_cpus: float = 4.0,
@@ -82,7 +83,7 @@ def build_blip_caption_udf(
             self.processor = BlipProcessor.from_pretrained(self.model_id)
             self.model = BlipForConditionalGeneration.from_pretrained(self.model_id)
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.model.to(self.device).eval()
+            self.model.to(self.device).eval()  # ty: ignore[invalid-argument-type]  # third-party stub gap
             self.is_loaded = True
 
         def __call__(self, col: pa.Array) -> pa.Array:
@@ -127,7 +128,7 @@ def build_blip_caption_udf(
                 def __len__(self):
                     return len(self.arr)
 
-                def __getitem__(self, i):
+                def __getitem__(self, i):  # ty: ignore[invalid-method-override]  # third-party stub gap
                     raw = self.arr[i].as_buffer().to_pybytes()
                     img = Image.open(io.BytesIO(raw)).convert("RGB")
                     # Run the resize/normalize processor in the worker proc, not
@@ -135,7 +136,7 @@ def build_blip_caption_udf(
                     # unconditional, so pixel_values is the only model input.
                     return processor(img, return_tensors="pt").pixel_values[0]
 
-            loader_kwargs = dict(
+            loader_kwargs: dict[str, Any] = dict(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 pin_memory=(self.device.type == "cuda"),
@@ -155,7 +156,7 @@ def build_blip_caption_udf(
             ):
                 for pixel_values in loader:
                     pixel_values = pixel_values.to(self.device, non_blocking=True)
-                    output_ids = self.model.generate(
+                    output_ids = self.model.generate(  # ty: ignore[missing-argument]  # third-party stub gap
                         pixel_values=pixel_values,
                         num_beams=1,
                         do_sample=False,

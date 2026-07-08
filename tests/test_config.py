@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from geneva_examples.core.config import DEFAULT_DB_URI, DEFAULT_TABLE_NAME, load_config
+from geneva_examples.core.config import DEFAULT_DB_URI, load_config
 
 
 def _write(path: Path, body: str) -> Path:
@@ -23,7 +23,6 @@ def test_load_minimal_applies_defaults(tmp_path: Path):
     )
     assert cfg.lancedb_api_key == "key"
     assert cfg.db_uri == DEFAULT_DB_URI
-    assert cfg.table_name == DEFAULT_TABLE_NAME
     assert cfg.storage_options() is None
 
 
@@ -40,6 +39,32 @@ def test_storage_options_requires_all_four_s3_fields(tmp_path: Path):
 def test_storage_options_none_when_partial(tmp_path: Path):
     body = "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\ns3_access_key: a\n"
     assert load_config(_write(tmp_path / "c.yaml", body)).storage_options() is None
+
+
+def _s3_config(tmp_path: Path, allow_http_line: str) -> dict:
+    body = (
+        "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\n"
+        "s3_access_key: a\ns3_secret_key: s\ns3_endpoint: e\ns3_region: auto\n"
+        f"{allow_http_line}"
+    )
+    return load_config(_write(tmp_path / "c.yaml", body)).storage_options()
+
+
+def test_aws_allow_http_defaults_false(tmp_path: Path):
+    assert _s3_config(tmp_path, "")["aws_allow_http"] == "false"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("aws_allow_http: true\n", "true"),  # native YAML bool
+        ('aws_allow_http: "true"\n', "true"),  # quoted string
+        ("aws_allow_http: false\n", "false"),
+        ('aws_allow_http: "false"\n', "false"),  # quoted "false" is NOT truthy
+    ],
+)
+def test_aws_allow_http_coercion(tmp_path: Path, line: str, expected: str):
+    assert _s3_config(tmp_path, line)["aws_allow_http"] == expected
 
 
 def test_missing_required_field_raises(tmp_path: Path):

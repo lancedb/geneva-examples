@@ -54,10 +54,9 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    cfg.table_name = table_name
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info("db_uri %s table %s pdf_dir %s", cfg.db_uri, cfg.table_name, pdf_dir)
+    logger.info("db_uri %s table %s pdf_dir %s", cfg.db_uri, table_name, pdf_dir)
 
     conn = connect(cfg)
 
@@ -67,14 +66,14 @@ def run(
 
     if overwrite:
         try:
-            conn.drop_table(cfg.table_name)
-            logger.info("dropped_existing_table %s", cfg.table_name)
+            conn.drop_table(table_name)
+            logger.info("dropped_existing_table %s", table_name)
         except Exception:  # noqa: BLE001
             pass
 
     table = retry_io(
         "create_table",
-        lambda: conn.create_table(cfg.table_name, data=pdf_batches[0]),
+        lambda: conn.create_table(table_name, data=pdf_batches[0]),
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )

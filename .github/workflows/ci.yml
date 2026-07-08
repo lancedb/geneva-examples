@@ -43,6 +43,24 @@ jobs:
       - name: Tests + coverage
         run: uv run pytest
 
+      # Surface the coverage report in the run's Summary tab so reviewers see
+      # per-file numbers without downloading the artifact. The 90% gate itself is
+      # enforced by pytest (--cov-fail-under in pyproject.toml); `if: always()`
+      # renders the breakdown even when that gate fails, so you can see what
+      # dropped it.
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            {
+              echo "## Coverage — $(uv run coverage report --format=total)% total"
+              echo
+              uv run coverage report --format=markdown
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No .coverage data — tests did not run." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # ty is a preview type checker; report its findings but never fail CI on
       # them (mirrors the non-blocking local pre-commit hook).
       - name: Type check (ty, non-blocking)

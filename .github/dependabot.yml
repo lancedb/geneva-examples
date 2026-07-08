@@ -20,8 +20,19 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Two groups so a heavy runtime bump (torch/gradio/…) lands in its own PR
+    # instead of blocking a one-line dev-tool update. Dependabot assigns each
+    # update to the first matching group, so the specific dev-tooling patterns
+    # win before the runtime catch-all.
     groups:
-      python:
+      dev-tooling:
+        patterns:
+          - "ruff"
+          - "ty"
+          - "pytest*"
+          - "pre-commit*"
+          - "coverage*"
+      runtime:
         patterns: ["*"]
     commit-message:
       prefix: "deps"

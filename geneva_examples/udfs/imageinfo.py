@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -25,7 +26,7 @@ IMAGEINFO_RUNTIME_PIP = [
 ]
 
 
-def build_file_size_udf(*, input_column: str, manifest: object):
+def build_file_size_udf(*, input_column: str, manifest: Any):
     """Build a UDF returning the byte length of ``input_column``."""
     import geneva
     import pyarrow as pa
@@ -42,7 +43,7 @@ def build_file_size_udf(*, input_column: str, manifest: object):
     return file_size
 
 
-def build_dimensions_udf(*, input_column: str, manifest: object):
+def build_dimensions_udf(*, input_column: str, manifest: Any):
     """Build a UDF returning ``{width, height}`` of an encoded image."""
     import geneva
     import pyarrow as pa

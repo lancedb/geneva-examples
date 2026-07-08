@@ -93,8 +93,8 @@ def _decode_seed_clip(video: bytes, chunk_seconds: float):
         s = c.streams.video[0]
         if s.duration is not None and s.time_base is not None:
             dur = float(s.duration * s.time_base)
-        elif c.duration is not None:
-            dur = float(c.duration) / float(av.time_base)
+        elif c.duration is not None:  # ty: ignore[unresolved-attribute]  # third-party stub gap
+            dur = float(c.duration) / float(av.time_base)  # ty: ignore[unresolved-attribute]  # third-party stub gap
         else:
             dur = 0.0
     if dur <= 0:
@@ -105,7 +105,7 @@ def _decode_seed_clip(video: bytes, chunk_seconds: float):
     with av.open(io.BytesIO(video)) as inp:
         ins = inp.streams.video[0]
         tb = ins.time_base
-        for fr in inp.decode(ins):
+        for fr in inp.decode(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
             if fr.time is None or fr.time < start:
                 continue
             img = Image.fromarray(fr.to_ndarray(format="rgb24"))
@@ -117,17 +117,17 @@ def _decode_seed_clip(video: bytes, chunk_seconds: float):
         # Re-seek to the start keyframe (decode above advanced the demuxer) and
         # stream-copy packets in [start, end) into a fresh mp4.
         if tb is not None:
-            inp.seek(int(start / tb), stream=ins, backward=True)
+            inp.seek(int(start / tb), stream=ins, backward=True)  # ty: ignore[unresolved-attribute]  # third-party stub gap
         with av.open(out_buf, "w", format="mp4") as out:
             try:
                 ostream = out.add_stream_from_template(ins)
             except AttributeError:
-                ostream = out.add_stream(template=ins)
+                ostream = out.add_stream(template=ins)  # ty: ignore[no-matching-overload]  # third-party stub gap
             base_dts = None
-            for packet in inp.demux(ins):
+            for packet in inp.demux(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
                 if packet.pts is None or packet.dts is None:
                     continue
-                if float(packet.pts * tb) >= end:
+                if float(packet.pts * tb) >= end:  # ty: ignore[unsupported-operator]  # third-party stub gap
                     break
                 if base_dts is None:
                     base_dts = packet.dts
@@ -172,7 +172,7 @@ def build_constant_bytes_udf(
         checkpoint_size=checkpoint_size,
         task_size=task_size,
         version=uuid.uuid4().hex,
-        manifest=manifest,
+        manifest=manifest,  # ty: ignore[invalid-argument-type]  # third-party stub gap
     )
     def _constant_bytes(value: str) -> bytes:
         return data

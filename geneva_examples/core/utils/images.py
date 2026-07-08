@@ -2,6 +2,7 @@
 
 import logging
 from io import BytesIO
+from typing import Any
 
 import pyarrow as pa
 
@@ -36,7 +37,7 @@ def load_hf_image_batches(
     return batches
 
 
-def decode_images_from_table(table: object, limit: int | None = None) -> list[object]:
+def decode_images_from_table(table: Any, limit: int | None = None) -> list[object]:
     """Decode stored PNG bytes from ``table`` into PIL images."""
     from PIL import Image
 

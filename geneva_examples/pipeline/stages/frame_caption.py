@@ -51,13 +51,10 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    cfg.table_name = table_name
     resolved_gpus = num_gpus if num_gpus is not None else 0.5
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info(
-        "db_uri %s table %s column %s", cfg.db_uri, cfg.table_name, input_column
-    )
+    logger.info("db_uri %s table %s column %s", cfg.db_uri, table_name, input_column)
     logger.info(
         "batch_size %s num_workers %s num_gpus %s",
         batch_size,
@@ -66,7 +63,7 @@ def run(
     )
 
     conn = connect(cfg)
-    table = conn.open_table(cfg.table_name)
+    table = conn.open_table(table_name)
 
     manifest = (
         GenevaManifest.create_pip(f"frame-caption-{uuid.uuid4().hex[:6]}")
@@ -87,7 +84,7 @@ def run(
     table = backfill_column(
         conn=conn,
         table=table,
-        table_name=cfg.table_name,
+        table_name=table_name,
         column=output_column,
         udf=udf,
         concurrency=concurrency,
