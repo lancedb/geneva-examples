@@ -15,6 +15,9 @@ _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
+# Socket timeout (seconds) for each blocking connect/read, so a stalled CDN
+# fails instead of hanging the ingest forever.
+_DOWNLOAD_TIMEOUT_S = 60
 
 
 def _download(url: str, dest: Path) -> bytes:
@@ -27,10 +30,18 @@ def _download(url: str, dest: Path) -> bytes:
     tmp = dest.with_suffix(dest.suffix + ".part")
     logger.info("downloading %s -> %s", url, dest)
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req) as resp, open(tmp, "wb") as out:  # noqa: RUF100, S310
-        while chunk := resp.read(1 << 20):
-            out.write(chunk)
-    tmp.replace(dest)
+    try:
+        with (
+            urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_S) as resp,
+            open(tmp, "wb") as out,
+        ):
+            while chunk := resp.read(1 << 20):
+                out.write(chunk)
+        tmp.replace(dest)
+    except BaseException:
+        # Don't leave a truncated .part behind on error/timeout/Ctrl-C.
+        tmp.unlink(missing_ok=True)
+        raise
     logger.info("downloaded %s (%d bytes)", dest.name, dest.stat().st_size)
     return dest.read_bytes()
 
@@ -143,7 +154,7 @@ def normalize_openvid_reference_batch(
     if skip_null_video:
         # Filter on the blob *descriptor* (no bytes pulled): a null/absent blob
         # has no source video to chunk.
-        tbl = tbl.filter(pc.is_valid(tbl["video_blob"]))
+        tbl = tbl.filter(pc.is_valid(tbl["video_blob"]))  # ty: ignore[unresolved-attribute]  # third-party stub gap
     if tbl.num_rows == 0:
         return pa.RecordBatch.from_pylist([], schema=schema)
 

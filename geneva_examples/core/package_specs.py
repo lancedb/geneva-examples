@@ -14,16 +14,28 @@ targeted on the workers without touching code.
 from __future__ import annotations
 
 import os
+import re
 from importlib.metadata import version
+
+
+def _default_env_var(package: str) -> str:
+    """``{PACKAGE}_PACKAGE_SPEC`` with non-alphanumerics normalized to ``_``.
+
+    Distribution names may contain ``-``/``.`` (e.g. ``open-clip-torch``), which
+    are illegal in shell environment-variable names — collapse them to ``_`` so
+    the override key is always a valid identifier (``OPEN_CLIP_TORCH_PACKAGE_SPEC``).
+    """
+    return re.sub(r"[^0-9A-Za-z]+", "_", package).upper() + "_PACKAGE_SPEC"
 
 
 def package_spec(package: str, *, env_var: str | None = None) -> str:
     """Return ``package==<installed version>``, or an env override if set.
 
-    ``env_var`` defaults to ``{PACKAGE}_PACKAGE_SPEC`` (uppercased package name).
-    The override is returned exactly as given — it need not be an ``==`` pin.
+    ``env_var`` defaults to ``{PACKAGE}_PACKAGE_SPEC`` (uppercased, with any
+    ``-``/``.`` normalized to ``_``). The override is returned exactly as given —
+    it need not be an ``==`` pin.
     """
-    env_var = env_var or f"{package.upper()}_PACKAGE_SPEC"
+    env_var = env_var or _default_env_var(package)
     override = os.environ.get(env_var)
     if override:
         return override

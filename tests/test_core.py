@@ -49,6 +49,24 @@ def test_retry_io_raises_after_exhausting(monkeypatch):
         retry.retry_io("op", always_fails, attempts=3, sleep_s=0.01)
 
 
+def test_retry_io_does_not_retry_unlisted_exception(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(retry.time, "sleep", lambda s: sleeps.append(s))
+    calls = {"n": 0}
+
+    def fails_with_type_error():
+        calls["n"] += 1
+        raise TypeError("not transient")
+
+    # Only ConnectionError is retryable, so TypeError propagates on the first try.
+    with pytest.raises(TypeError, match="not transient"):
+        retry.retry_io(
+            "op", fails_with_type_error, attempts=5, retry_on=ConnectionError
+        )
+    assert calls["n"] == 1
+    assert sleeps == []
+
+
 class _Schema:
     def __init__(self, names):
         self.names = names

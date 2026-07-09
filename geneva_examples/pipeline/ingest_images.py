@@ -22,7 +22,7 @@ def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
     log_level: str = typer.Option("INFO", help="Logging level."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str | None = typer.Option(None, help="Override config table_name."),
+    table_name: str = typer.Option("images", help="Target table name."),
     num_images: int = typer.Option(75, help="Number of images to load."),
     frag_size: int = typer.Option(25, help="Images per record batch."),
     hf_dataset: str = typer.Option(
@@ -49,11 +49,9 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    if table_name:
-        cfg.table_name = table_name
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info("db_uri %s table %s", cfg.db_uri, cfg.table_name)
+    logger.info("db_uri %s table %s", cfg.db_uri, table_name)
     logger.info(
         "hf_dataset %s hf_split %s rows_target %s", hf_dataset, hf_split, num_images
     )
@@ -71,14 +69,14 @@ def run(
 
     if overwrite:
         try:
-            conn.drop_table(cfg.table_name)
-            logger.info("dropped_existing_table %s", cfg.table_name)
+            conn.drop_table(table_name)
+            logger.info("dropped_existing_table %s", table_name)
         except Exception:  # noqa: BLE001
             pass
 
     table = retry_io(
         "create_table",
-        lambda: conn.create_table(cfg.table_name, data=image_batches[0]),
+        lambda: conn.create_table(table_name, data=image_batches[0]),
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )

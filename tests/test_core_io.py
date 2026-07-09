@@ -101,10 +101,25 @@ def test_download_fetches_when_absent(tmp_path: Path, monkeypatch):
             self._done = True
             return self._data
 
-    monkeypatch.setattr(videos.urllib.request, "urlopen", lambda _req: _Resp(b"DATA"))
+    monkeypatch.setattr(
+        videos.urllib.request, "urlopen", lambda _req, timeout=None: _Resp(b"DATA")
+    )
     dest = tmp_path / "nested" / "v.mp4"
     assert videos._download("http://example/v.mp4", dest) == b"DATA"
     assert dest.read_bytes() == b"DATA"
+
+
+def test_download_cleans_up_partial_on_failure(tmp_path: Path, monkeypatch):
+    def boom(_req, timeout=None):
+        raise TimeoutError("stalled")
+
+    monkeypatch.setattr(videos.urllib.request, "urlopen", boom)
+    dest = tmp_path / "v.mp4"
+    with pytest.raises(TimeoutError):
+        videos._download("http://example/v.mp4", dest)
+    # No truncated .part file left behind, and no final file either.
+    assert not dest.with_suffix(".mp4.part").exists()
+    assert not dest.exists()
 
 
 def test_download_video_batches_fragments(monkeypatch):

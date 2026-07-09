@@ -8,10 +8,9 @@ build UDF(s) -> backfill each column. These tests drive each mockable stage thro
 ``typer``'s ``CliRunner`` with the cluster boundary mocked (see ``tests/_fakes.py``),
 so a regression in that glue fails fast without a cluster, GPU, or model weights.
 
-The ``embed`` stage is intentionally omitted: its post-backfill demo in
-``stages/embeddings.py`` imports ``open_clip``+``torch`` unconditionally, so it
-can't be driven without those heavyweight deps. Its UDF factory is shared with
-``frame_embed``, which IS covered here.
+The ``embed`` stage is driven with ``--no-search-demo`` (its own test below): the
+optional post-backfill search demo imports ``open_clip``+``torch`` on the driver,
+but the backfill wiring itself doesn't, so the flag lets it run mocked.
 """
 
 from __future__ import annotations
@@ -57,6 +56,27 @@ def test_stage_cli_wires_backfill(
     # Every expected feature column was added and backfilled via the shared runner.
     assert set(table.added) == expected
     assert set(table.backfilled) == expected
+
+
+def test_embed_stage_wires_backfill(
+    monkeypatch: pytest.MonkeyPatch, fake_geneva: None
+) -> None:
+    # --no-search-demo skips the open_clip/torch driver demo, leaving just the
+    # backfill wiring to exercise.
+    mod = importlib.import_module("geneva_examples.pipeline.stages.embeddings")
+    table = FakeTable(names=["id"])
+
+    cfg = types.SimpleNamespace(db_uri="db://test")
+    monkeypatch.setattr(mod, "load_config", lambda _config: cfg)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: FakeConn(table=table))
+
+    result = CliRunner().invoke(
+        mod.app, ["--no-search-demo", "--schema-wait-sleep-s", "0"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert set(table.added) == {"embedding"}
+    assert set(table.backfilled) == {"embedding"}
 
 
 def test_pdf_chunk_stage_wires_backfill(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -77,7 +77,6 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    cfg.table_name = table_name
 
     # Reference-only ingest: scan with the *default* blob handling so `video_blob`
     # stays a descriptor (struct<position,size> — no bytes pulled to the client),
@@ -90,7 +89,7 @@ def run(
     logger.info(
         "db_uri %s table %s source %s limit %s",
         cfg.db_uri,
-        cfg.table_name,
+        table_name,
         dataset_uri,
         limit,
     )
@@ -107,8 +106,8 @@ def run(
 
     if overwrite:
         try:
-            conn.drop_table(cfg.table_name)
-            logger.info("dropped_existing_table %s", cfg.table_name)
+            conn.drop_table(table_name)
+            logger.info("dropped_existing_table %s", table_name)
         except Exception:  # noqa: BLE001
             pass
 
@@ -122,7 +121,7 @@ def run(
         if table is None:
             table = retry_io(
                 "create_table",
-                lambda b=norm: conn.create_table(cfg.table_name, data=b),
+                lambda b=norm: conn.create_table(table_name, data=b),
                 attempts=table_write_retries,
                 sleep_s=table_write_retry_sleep_s,
             )

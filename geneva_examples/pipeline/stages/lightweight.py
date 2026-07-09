@@ -22,7 +22,7 @@ def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
     log_level: str = typer.Option("INFO", help="Logging level."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str | None = typer.Option(None, help="Override config table_name."),
+    table_name: str = typer.Option("images", help="Table to operate on."),
     backfill_timeout_min: int = typer.Option(1000, help="Per-backfill timeout (min)."),
     backfill_concurrency: int = typer.Option(32, help="Backfill concurrency."),
     backfill_task_size: int = typer.Option(256, help="Backfill task size."),
@@ -48,14 +48,12 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    if table_name:
-        cfg.table_name = table_name
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info("db_uri %s table %s", cfg.db_uri, cfg.table_name)
+    logger.info("db_uri %s table %s", cfg.db_uri, table_name)
 
     conn = connect(cfg)
-    table = conn.open_table(cfg.table_name)
+    table = conn.open_table(table_name)
 
     manifest = (
         GenevaManifest.create_pip(f"light-{uuid.uuid4().hex[:6]}")
@@ -70,7 +68,7 @@ def run(
         table = backfill_column(
             conn=conn,
             table=table,
-            table_name=cfg.table_name,
+            table_name=table_name,
             column=column,
             udf=udf,
             concurrency=backfill_concurrency,

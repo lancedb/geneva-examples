@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help install lock lint lint-fix format format-check typecheck \
-        test check precommit hooks udf-studio clean
+        test check audit precommit hooks udf-studio clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -36,6 +36,11 @@ test: ## Run the test suite with coverage (gate enforced via pyproject)
 
 check: lint format-check test ## Run the full CI gate locally (lint + format + tests)
 
+audit: ## Scan locked dependencies for known CVEs (mirrors the CI audit job)
+	uv export --frozen --no-emit-project --no-hashes \
+		--format requirements-txt -o requirements.txt
+	uvx pip-audit -r requirements.txt
+
 precommit: ## Run all pre-commit hooks across the repo
 	uv run pre-commit run --all-files
 
@@ -46,5 +51,5 @@ udf-studio: ## Launch UDF Studio (Gradio)
 	uv run udf-studio
 
 clean: ## Remove caches and coverage artifacts
-	rm -rf .pytest_cache .ruff_cache .coverage coverage.xml htmlcov
+	rm -rf .pytest_cache .ruff_cache .coverage coverage.xml htmlcov requirements.txt
 	find . -type d -name __pycache__ -not -path './.venv/*' -prune -exec rm -rf {} +

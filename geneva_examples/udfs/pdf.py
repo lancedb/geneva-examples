@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -54,7 +55,7 @@ PDF_RUNTIME_PIP = [
 ]
 
 
-def build_extract_pages_udf(*, manifest: object):
+def build_extract_pages_udf(*, manifest: Any):
     """Build the ``extract_pages`` UDF (``pdf_bytes`` -> per-page text).
 
     Reuses ``geneva.udfs.document.extract_pages`` with this repo's manifest and a
@@ -67,7 +68,7 @@ def build_extract_pages_udf(*, manifest: object):
     return attrs.evolve(extract_pages, manifest=manifest, version=uuid.uuid4().hex)
 
 
-def build_chunk_pages_udf(*, manifest: object):
+def build_chunk_pages_udf(*, manifest: Any):
     """Build the ``chunk_pages`` UDF (``pages`` -> overlapping text chunks).
 
     Reuses ``geneva.udfs.document.chunk_pages`` with this repo's manifest and a

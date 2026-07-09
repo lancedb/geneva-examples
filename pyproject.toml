@@ -1,7 +1,7 @@
 [project]
 name = "geneva-examples"
 version = "0.1.0"
-description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Cloud, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
+description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Enterprise, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.24.0",
@@ -19,7 +19,7 @@ dependencies = [
     "pillow>=10",
     "torch>=2.2",
     "open-clip-torch>=2.24",
-    "transformers>=4.40",
+    "transformers>=5",
     "datasets>=3.0.0",
     # Explicit (already transitive via datasets): enables the `hf://datasets/...`
     # connect URI used by the OpenVid ingest CLI.
@@ -32,8 +32,8 @@ dependencies = [
     "pypdf>=5,<6",
     "langchain-text-splitters>=0.3,<0.4",
     # UDF Studio: in-browser Gradio sandbox for prototyping UDFs/chunkers.
-    # >=4.44 for gr.Timer.
-    "gradio>=4.44",
+    # >=6: the UI is built and tested against the Gradio 6 API (4.x/5.x differ).
+    "gradio>=6",
 ]
 
 [project.scripts]
@@ -164,6 +164,9 @@ omit = [
     "geneva_examples/pipeline/stages/pdf_chunks.py",
     # Ops CLIs: dominated by cluster/HTTP command bodies.
     "geneva_examples/ops/*",
+    # Pure structural Protocols under TYPE_CHECKING: abstract `...` bodies that
+    # never execute, so they only distort the line-coverage metric.
+    "geneva_examples/core/_types.py",
     # Gradio UI wiring (event handlers need a browser runtime). The studio
     # submodule (runner/library/samples/templates) IS unit-tested -> kept in.
     "geneva_examples/apps/udf_studio.py",

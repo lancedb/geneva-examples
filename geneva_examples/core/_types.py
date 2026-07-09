@@ -18,6 +18,16 @@ class SchemaLike(Protocol):
     names: list[str]
 
 
+class QueryLike(Protocol):
+    """A lazy query builder: ``search(...).select(...).limit(...).to_list()``."""
+
+    def select(self, columns: list[str]) -> QueryLike: ...
+
+    def limit(self, n: int) -> QueryLike: ...
+
+    def to_list(self) -> list[dict[str, object]]: ...
+
+
 class JobLike(Protocol):
     """A submitted Geneva backfill job, identified by ``job_id``."""
 
@@ -38,6 +48,8 @@ class TableLike(Protocol):
     def checkout_latest(self) -> object: ...
 
     def count_rows(self, filter: str | None = ...) -> int: ...
+
+    def search(self, *args: object, **kwargs: object) -> QueryLike: ...
 
 
 class ConnectionLike(Protocol):

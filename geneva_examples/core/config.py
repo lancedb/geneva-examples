@@ -1,8 +1,7 @@
 """Configuration loaded from a YAML file.
 
-The YAML file is the single source of truth for secrets, the connection target,
-and the table identity shared across the ingest and stage CLIs. See
-``config-example.yaml``.
+The YAML file is the single source of truth for secrets and the connection
+target shared across the ingest and stage CLIs. See ``config-example.yaml``.
 """
 
 from __future__ import annotations
@@ -13,23 +12,39 @@ from pathlib import Path
 import yaml
 
 DEFAULT_DB_URI = "db://quickstart"
-DEFAULT_TABLE_NAME = "images"
+_TRUTHY = {"true", "1", "yes", "on"}
+
+
+def _as_bool(value: object) -> bool:
+    """Coerce a YAML scalar (native bool or string like ``"false"``) to bool.
+
+    YAML parses bare ``false`` to ``False`` but quoted ``"false"`` to the string
+    ``"false"`` (which is truthy), so both forms are normalized here. Absent/None
+    defaults to ``False``.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUTHY
+    return bool(value)
 
 
 @dataclass
 class Config:
-    """Resolved configuration for LanceDB Cloud, S3-compatible storage, and the table."""
+    """Resolved configuration for LanceDB Enterprise and S3-compatible storage.
+
+    Table names are *not* config: each CLI declares its own ``--table-name``
+    default (``images`` for the image workflow, ``videos``/``video_clips`` for
+    video, ``pdfs`` for PDFs), so the target table is explicit per command.
+    """
 
     lancedb_api_key: str
     lancedb_region: str
     geneva_host: str
     db_uri: str
-    table_name: str
     s3_access_key: str | None
     s3_secret_key: str | None
     s3_endpoint: str | None
     s3_region: str | None
-    aws_allow_http: str
+    aws_allow_http: bool
     hf_token: str | None
 
     def storage_options(self) -> dict[str, str] | None:
@@ -47,7 +62,7 @@ class Config:
             "aws_endpoint": self.s3_endpoint,
             "aws_region": self.s3_region,
             "aws_s3_force_path_style": "true",
-            "aws_allow_http": self.aws_allow_http,
+            "aws_allow_http": "true" if self.aws_allow_http else "false",
         }
 
 
@@ -80,11 +95,10 @@ def load_config(config_path: Path | None = None) -> Config:
         lancedb_region=data["lancedb_region"],
         geneva_host=data["geneva_host"],
         db_uri=data.get("db_uri") or DEFAULT_DB_URI,
-        table_name=data.get("table_name") or DEFAULT_TABLE_NAME,
         s3_access_key=data.get("s3_access_key"),
         s3_secret_key=data.get("s3_secret_key"),
         s3_endpoint=data.get("s3_endpoint"),
         s3_region=data.get("s3_region"),
-        aws_allow_http=data.get("aws_allow_http") or "false",
+        aws_allow_http=_as_bool(data.get("aws_allow_http")),
         hf_token=data.get("hf_token") or None,
     )

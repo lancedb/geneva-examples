@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -36,7 +37,7 @@ OPENPOSE_RUNTIME_PIP = [
 def build_openpose_udf(
     *,
     input_column: str,
-    manifest: object,
+    manifest: Any,
     batch_size: int = 256,
     num_workers: int = 4,
     num_cpus: float = 2.0,
@@ -78,7 +79,9 @@ def build_openpose_udf(
 
         def setup(self):
             import torch
-            from controlnet_aux import OpenposeDetector
+
+            # controlnet_aux ships no type stubs; import resolves on the worker.
+            from controlnet_aux import OpenposeDetector  # ty: ignore[unresolved-import]
 
             self.detector = OpenposeDetector.from_pretrained(self.repo)
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -122,7 +125,7 @@ def build_openpose_udf(
                 def __len__(self):
                     return len(self.arr)
 
-                def __getitem__(self, i):
+                def __getitem__(self, i):  # ty: ignore[invalid-method-override]  # third-party stub gap
                     # `frame` can be null (chunker emits a row even when no
                     # start frame decoded); null/undecodable -> None -> null out.
                     scalar = self.arr[i]
@@ -134,7 +137,7 @@ def build_openpose_udf(
                     except Exception:  # noqa: BLE001
                         return None
 
-            loader_kwargs = dict(
+            loader_kwargs: dict[str, Any] = dict(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 collate_fn=list,

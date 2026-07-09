@@ -1,22 +1,22 @@
 # Configuration for the Geneva quickstart CLIs.
 # Copy to config.yaml and fill in. config.yaml is gitignored.
 #
-# This is the single source of truth: secrets, the connection target, and the
-# table identity shared by the ingest and stage CLIs.
+# This is the single source of truth for secrets and the connection target
+# shared by the ingest and stage CLIs. Table names are not configured here —
+# each CLI declares its own --table-name default (see `<cli> --help`).
 
 # --- Required ---
-# LanceDB Cloud API key.
+# LanceDB Enterprise API key.
 lancedb_api_key: "your-lancedb-api-key"
 
-# LanceDB Cloud region.
+# LanceDB Enterprise region.
 lancedb_region: "us-east-1"
 
 # Geneva host (the remote runtime load-balancer endpoint).
 geneva_host: "http://<elb-host>:10024"
 
-# --- Table identity (shared across ingest + stage CLIs) ---
+# --- Connection target (shared across ingest + stage CLIs) ---
 db_uri: "db://quickstart"
-table_name: "images"
 
 # --- S3-compatible storage credentials ---
 # Storage options are only applied when access key, secret key, endpoint, and
@@ -25,7 +25,7 @@ table_name: "images"
 # s3_secret_key: "your-s3-secret-key"
 # s3_endpoint: "https://s3.us-east-1.amazonaws.com"
 # s3_region: "us-east-1"
-# aws_allow_http: "false"
+# aws_allow_http: false   # true to allow plain-HTTP S3 endpoints
 
 # --- Hugging Face ---
 # Optional token for reading hf:// datasets (e.g. the OpenVid blob source during

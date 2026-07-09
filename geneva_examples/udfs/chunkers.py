@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 from geneva_examples.core.package_specs import package_spec
 
@@ -44,7 +45,7 @@ VIDEO_RUNTIME_PIP = [
 def chunk_video_udtf(
     *,
     chunk_seconds: float,
-    manifest: object,
+    manifest: Any,
     num_cpus: float = 1.0,
     num_gpus: float = 0.0,
     memory_bytes: int = 1024**3,
@@ -69,7 +70,7 @@ def chunk_video_udtf(
     limit = None if max_video_s is None else float(max_video_s)
     max_clips = None if num_clips is None else int(num_clips)
 
-    @geneva.chunker(
+    @geneva.chunker(  # ty: ignore[call-non-callable]  # third-party stub gap
         output_schema=output_schema,
         input_columns=["video"],
         # Fetch `video` to run the chunker, but don't copy it onto each clip row
@@ -110,8 +111,8 @@ def chunk_video_udtf(
                 s = c.streams.video[0]
                 if s.duration is not None and s.time_base is not None:
                     return float(s.duration * s.time_base)
-                if c.duration is not None:
-                    return float(c.duration) / float(av.time_base)
+                if c.duration is not None:  # ty: ignore[unresolved-attribute]  # third-party stub gap
+                    return float(c.duration) / float(av.time_base)  # ty: ignore[unresolved-attribute]  # third-party stub gap
             return 0.0
 
         def _encode_clip(b, start, end):
@@ -138,8 +139,8 @@ def chunk_video_udtf(
                 #    — and that payload is what bounds each actor's in-memory
                 #    expansion (Geneva buffers a whole 1024-row work item).
                 if start > 0 and tb is not None:
-                    inp.seek(int(start / tb), stream=ins, backward=True)
-                for fr in inp.decode(ins):
+                    inp.seek(int(start / tb), stream=ins, backward=True)  # ty: ignore[unresolved-attribute]  # third-party stub gap
+                for fr in inp.decode(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
                     if fr.time is None or fr.time < start:
                         continue
                     img = Image.fromarray(fr.to_ndarray(format="rgb24"))
@@ -153,18 +154,18 @@ def chunk_video_udtf(
                 #    advanced the demuxer) and stream-copy packets in
                 #    [start, end), rebasing timestamps to 0.
                 if start > 0 and tb is not None:
-                    inp.seek(int(start / tb), stream=ins, backward=True)
+                    inp.seek(int(start / tb), stream=ins, backward=True)  # ty: ignore[unresolved-attribute]  # third-party stub gap
                 with av.open(out_buf, "w", format="mp4") as out:
                     # PyAV renamed this across versions; support both spellings.
                     try:
                         ostream = out.add_stream_from_template(ins)
                     except AttributeError:
-                        ostream = out.add_stream(template=ins)
+                        ostream = out.add_stream(template=ins)  # ty: ignore[no-matching-overload]  # third-party stub gap
                     base_dts = None
-                    for packet in inp.demux(ins):
+                    for packet in inp.demux(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
                         if packet.pts is None or packet.dts is None:
                             continue
-                        if float(packet.pts * tb) >= end:
+                        if float(packet.pts * tb) >= end:  # ty: ignore[unsupported-operator]  # third-party stub gap
                             break
                         if base_dts is None:
                             base_dts = packet.dts
@@ -201,7 +202,7 @@ def chunk_blob_video_udtf(
     blob_column: str,
     pointer_column: str,
     chunk_seconds: float,
-    manifest: object,
+    manifest: Any,
     num_cpus: float = 1.0,
     num_gpus: float = 0.0,
     memory_bytes: int = 1024**3,
@@ -245,7 +246,7 @@ def chunk_blob_video_udtf(
     # not importable remotely, so a module-global won't exist on the worker).
     ds_cache: dict = {}
 
-    @geneva.chunker(
+    @geneva.chunker(  # ty: ignore[call-non-callable]  # third-party stub gap
         output_schema=output_schema,
         input_columns=[pointer_column],
         # The pointer is fetched to read the blob but not copied onto clip rows;
@@ -291,8 +292,8 @@ def chunk_blob_video_udtf(
                 s = c.streams.video[0]
                 if s.duration is not None and s.time_base is not None:
                     return float(s.duration * s.time_base)
-                if c.duration is not None:
-                    return float(c.duration) / float(av.time_base)
+                if c.duration is not None:  # ty: ignore[unresolved-attribute]  # third-party stub gap
+                    return float(c.duration) / float(av.time_base)  # ty: ignore[unresolved-attribute]  # third-party stub gap
             return 0.0
 
         def _encode_clip(b, start, end):
@@ -319,8 +320,8 @@ def chunk_blob_video_udtf(
                 #    — and that payload is what bounds each actor's in-memory
                 #    expansion (Geneva buffers a whole 1024-row work item).
                 if start > 0 and tb is not None:
-                    inp.seek(int(start / tb), stream=ins, backward=True)
-                for fr in inp.decode(ins):
+                    inp.seek(int(start / tb), stream=ins, backward=True)  # ty: ignore[unresolved-attribute]  # third-party stub gap
+                for fr in inp.decode(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
                     if fr.time is None or fr.time < start:
                         continue
                     img = Image.fromarray(fr.to_ndarray(format="rgb24"))
@@ -334,18 +335,18 @@ def chunk_blob_video_udtf(
                 #    advanced the demuxer) and stream-copy packets in
                 #    [start, end), rebasing timestamps to 0.
                 if start > 0 and tb is not None:
-                    inp.seek(int(start / tb), stream=ins, backward=True)
+                    inp.seek(int(start / tb), stream=ins, backward=True)  # ty: ignore[unresolved-attribute]  # third-party stub gap
                 with av.open(out_buf, "w", format="mp4") as out:
                     # PyAV renamed this across versions; support both spellings.
                     try:
                         ostream = out.add_stream_from_template(ins)
                     except AttributeError:
-                        ostream = out.add_stream(template=ins)
+                        ostream = out.add_stream(template=ins)  # ty: ignore[no-matching-overload]  # third-party stub gap
                     base_dts = None
-                    for packet in inp.demux(ins):
+                    for packet in inp.demux(ins):  # ty: ignore[unresolved-attribute]  # third-party stub gap
                         if packet.pts is None or packet.dts is None:
                             continue
-                        if float(packet.pts * tb) >= end:
+                        if float(packet.pts * tb) >= end:  # ty: ignore[unsupported-operator]  # third-party stub gap
                             break
                         if base_dts is None:
                             base_dts = packet.dts

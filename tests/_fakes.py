@@ -45,6 +45,10 @@ class FakeTable:
         self.added: dict[str, Any] = {}
         self.backfilled: list[str] = []
         self.dropped: list[str] = []
+        self.adds: list[Any] = []  # record batches appended via add()
+
+    def add(self, data: Any) -> None:
+        self.adds.append(data)
 
     def drop_columns(self, columns: list[str]) -> None:
         self.dropped.extend(columns)
@@ -59,6 +63,9 @@ class FakeTable:
     def backfill(self, column: str, **_kwargs: Any) -> Job:
         self.backfilled.append(column)
         return Job()
+
+    def refresh(self, **_kwargs: Any) -> None:
+        pass  # materialized-view refresh (chunk CLIs)
 
     def checkout_latest(self) -> None:
         pass
@@ -81,13 +88,18 @@ class FakeTable:
 
 
 class FakeConn:
-    """Opens a single table, or named tables from a mapping (``stats``)."""
+    """Opens a single table, or named tables from a mapping (``stats``).
+
+    Also records ``create_table``/``drop_table`` for the ingest/cleanup CLIs.
+    """
 
     def __init__(
         self, table: FakeTable | None = None, tables: dict[str, FakeTable] | None = None
     ) -> None:
         self._table = table
         self._tables = tables or {}
+        self.created: dict[str, FakeTable] = {}
+        self.dropped: list[str] = []
 
     def open_table(self, name: str) -> FakeTable:
         if name in self._tables:
@@ -95,6 +107,27 @@ class FakeConn:
         if self._table is not None:
             return self._table
         raise RuntimeError(f"table not found: {name}")
+
+    def create_table(self, name: str, data: Any = None, **_kwargs: Any) -> FakeTable:
+        table = self._table if self._table is not None else FakeTable()
+        self._tables.setdefault(name, table)
+        self.created[name] = table
+        return table
+
+    def drop_table(self, name: str) -> None:
+        self.dropped.append(name)
+        self._tables.pop(name, None)
+
+    def create_udtf_view(
+        self, name: str, source: Any = None, udtf: Any = None, **_kwargs: Any
+    ) -> FakeTable:
+        view = self._table if self._table is not None else FakeTable()
+        self._tables.setdefault(name, view)
+        self.created[name] = view
+        return view
+
+    def table_names(self) -> list[str]:
+        return list(self._tables) or list(self.created)
 
 
 class FakeManifest:

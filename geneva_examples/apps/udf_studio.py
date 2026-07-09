@@ -10,13 +10,20 @@ your edited code in this process so the iterate loop is fast. Promoting a
 finished function into a real ``@geneva.udf`` factory under ``geneva_examples/udfs/`` and a
 stage CLI stays a manual step.
 
+.. warning::
+    The editor runs arbitrary Python **in this process with no sandbox** — that
+    is the whole point of a local prototyping tool. Keep it bound to loopback
+    (the default ``127.0.0.1``). Passing ``--host 0.0.0.0`` or ``--share`` hands
+    anyone who can reach the server remote code execution on this machine; only
+    do that on a network you fully trust.
+
 Examples
 --------
     # launch on http://localhost:7860, reading samples from ./studio_data
     udf-studio
 
-    # custom data dir, library location, and bind address
-    udf-studio --data-dir ~/my-samples --library ~/udf-library --host 0.0.0.0
+    # custom data dir + library location (still bound to localhost)
+    udf-studio --data-dir ~/my-samples --library ~/udf-library
 """
 
 from __future__ import annotations
@@ -35,6 +42,10 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 DEFAULT_DATA_DIR = "studio_data"
 DEFAULT_LIBRARY = "udf_library"
+
+# Hosts that keep the server private to this machine. Binding anywhere else (or
+# using --share) exposes the in-process code executor to the network.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
 
 
 def _describe(value) -> str:
@@ -116,7 +127,7 @@ def build_ui(*, data_dir: str, library_path: str):
         run_btn = gr.Button("Run locally", variant="primary")
         summary = gr.Markdown()
         result_df = gr.Dataframe(label="Output", wrap=True)
-        error_box = gr.Textbox(label="Errors / traceback", lines=8, visible=True)
+        error_box = gr.Textbox(label="Errors / traceback", lines=8, visible=False)
 
         # ---- Library ----------------------------------------------------- #
         with gr.Accordion("UDF library (local LanceDB)", open=False):
@@ -159,7 +170,12 @@ def build_ui(*, data_dir: str, library_path: str):
 
         def on_run(k, src, values):
             res = runner.run(k, src, values)
-            return res["summary"], _rows_to_df(res["rows"]), res["error"]
+            # Only surface the error box when there's actually an error.
+            return (
+                res["summary"],
+                _rows_to_df(res["rows"]),
+                gr.update(value=res["error"], visible=bool(res["error"])),
+            )
 
         def on_save(lib, name, k, mod, src):
             try:
@@ -250,6 +266,15 @@ def run(
 ) -> None:
     """Launch the UDF Studio prototyping app."""
     setup_logging(log_level)
+    if share or host not in _LOOPBACK_HOSTS:
+        logger.warning(
+            "SECURITY: UDF Studio executes editor code in-process with no "
+            "sandbox. Exposing it (host=%s, share=%s) grants remote code "
+            "execution to anyone who can reach it — only do this on a trusted "
+            "network.",
+            host,
+            share,
+        )
     demo = build_ui(data_dir=data_dir, library_path=library)
     demo.launch(server_name=host, server_port=port, share=share)
 

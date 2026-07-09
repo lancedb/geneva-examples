@@ -1,7 +1,7 @@
 # geneva-examples — Geneva remote UDF examples
 
 A self-contained set of **example UDFs** and the **submission tooling** to run
-them against LanceDB Cloud + a remote Geneva runtime. Point it at your Geneva
+them against LanceDB Enterprise + a remote Geneva runtime. Point it at your Geneva
 host, fill in three config values, and run a backfill.
 
 What's here:
@@ -27,7 +27,7 @@ pinned pip manifests and run there. The driver/CLI code stays lightweight.
 ## Architecture
 
 The CLIs run **on your machine** (the driver). They only submit work: ingest CLIs
-load source data into LanceDB Cloud tables, and stage CLIs submit a Geneva
+load source data into LanceDB Enterprise tables, and stage CLIs submit a Geneva
 *backfill* that runs the UDF closures on **remote Geneva workers** (GPU-backed for
 the model stages). The `stats`/`jobs` CLIs read table and job state over the same
 connection.
@@ -35,36 +35,109 @@ connection.
 ```mermaid
 flowchart LR
   HF[("Hugging Face<br/>images / videos")]
+  LOCAL[("local PDFs")]
 
   subgraph driver["Your machine (driver / CLIs)"]
-    ING["ingest-images<br/>ingest-videos"]
+    ING["ingest-images<br/>ingest-videos<br/>ingest-pdfs"]
     CHUNK["chunk-videos"]
-    STAGES["lightweight / embed / caption<br/>frame-embed / frame-caption / frame-openpose"]
+    STAGES["lightweight / embed / caption<br/>frame-embed / frame-caption / frame-openpose<br/>chunk-pdfs"]
     OPS["stats / jobs"]
   end
 
-  subgraph cloud["LanceDB Cloud + Geneva runtime"]
+  subgraph cloud["LanceDB Enterprise + Geneva runtime"]
     IMAGES[("images")]
     VIDEOS[("videos")]
     CLIPS[("video_clips")]
+    PDFS[("pdfs")]
     WORKERS[["remote workers<br/>run UDF closures (CPU/GPU)"]]
   end
 
   HF --> ING
+  LOCAL --> ING
   ING --> IMAGES
   ING --> VIDEOS
+  ING --> PDFS
   VIDEOS --> CHUNK --> CLIPS
   STAGES -- "submit backfill" --> WORKERS
   WORKERS -- "add feature columns" --> IMAGES
   WORKERS -- "add feature columns" --> CLIPS
+  WORKERS -- "add pages / chunks" --> PDFS
   OPS -. "read state" .-> IMAGES
   OPS -. "read state" .-> CLIPS
+  OPS -. "read state" .-> PDFS
+```
+
+## Repository layout
+
+```text
+geneva-examples/
+├── geneva_examples/                  # the package: driver-side CLIs + reusable UDFs
+│   ├── core/                         # config, connection, and shared helpers
+│   │   ├── config.py                 # load config.yaml -> Config (creds, db_uri, S3, hf_token)
+│   │   ├── common.py                 # setup_logging, connect(), Ray memory sizing
+│   │   ├── package_specs.py          # resolve remote-runtime pip pins from installed versions
+│   │   ├── _types.py                 # structural Protocols for the Geneva/LanceDB objects
+│   │   └── utils/
+│   │       ├── images.py             # load HF images / decode stored PNGs -> Arrow batches
+│   │       ├── videos.py             # download MP4s + normalize OpenVid reference rows
+│   │       ├── pdfs.py               # read local *.pdf files -> Arrow batches
+│   │       ├── retry.py              # retry_io(): backoff + jitter for flaky table writes
+│   │       └── tables.py             # wait_for_columns(): poll until a new column is visible
+│   ├── udfs/                         # reusable @geneva.udf / @geneva.chunker factories + RUNTIME_PIP
+│   │   ├── imageinfo.py              # CPU UDFs: byte size + image dimensions
+│   │   ├── clip.py                   # OpenCLIP image embeddings (GPU)
+│   │   ├── blip.py                   # BLIP image captions (GPU)
+│   │   ├── openpose.py               # OpenPose pose-skeleton PNGs (GPU)
+│   │   ├── chunkers.py               # video-chunking UDTFs (raw bytes + OpenVid blob source)
+│   │   └── pdf.py                    # wrap geneva.udfs.document extract_pages / chunk_pages
+│   ├── pipeline/                     # ingest + backfill CLIs (the driver commands)
+│   │   ├── ingest_images.py          # load a HF image dataset -> images table
+│   │   ├── ingest_videos.py          # download MP4s -> videos table
+│   │   ├── ingest_videos_openvid.py  # register reference-only OpenVid rows
+│   │   ├── ingest_pdfs.py            # load local PDFs -> pdfs table
+│   │   ├── chunk_videos.py           # split videos -> video_clips (materialized view)
+│   │   ├── chunk_videos_openvid.py   # chunk by reading blobs from the OpenVid source
+│   │   ├── seed_video_clips.py       # synthesize clips to load-test the frame stages
+│   │   ├── cleanup.py                # drop the video/clip (and optional pdfs) tables
+│   │   └── stages/                   # single-column backfill CLIs (submit a Geneva backfill)
+│   │       ├── _runner.py            # backfill_column(): shared drop/add/wait/backfill flow
+│   │       ├── lightweight.py        # file_size + dimensions on images (CPU)
+│   │       ├── embeddings.py         # OpenCLIP embedding on images (+ optional search demo)
+│   │       ├── captions.py           # two BLIP caption variants on images
+│   │       ├── frame_embed.py        # OpenCLIP embedding on each clip's frame
+│   │       ├── frame_caption.py      # BLIP caption on each clip's frame
+│   │       ├── frame_openpose.py     # OpenPose skeleton on each clip's frame
+│   │       └── pdf_chunks.py         # pages + chunks backfill on the pdfs table (CPU)
+│   ├── ops/                          # read-only inspection CLIs
+│   │   ├── stats.py                  # summarize tables: rows, schema, feature columns
+│   │   └── jobs.py                   # list / show / tail / kill Geneva backfill jobs
+│   └── apps/                         # local (non-cluster) apps
+│       ├── udf_studio.py             # Gradio prototyping app (Typer entrypoint + UI)
+│       └── studio/
+│           ├── runner.py             # execute edited transform()/chunk() over samples
+│           ├── samples.py            # load sample inputs per modality from a data dir
+│           ├── templates.py          # starter UDF/chunker code snippets
+│           └── library.py            # save/load WIP functions in a local LanceDB
+├── tests/                            # pytest suite (cluster boundary mocked)
+│   ├── conftest.py                   # synthetic-media fixtures (PNG/MP4/PDF, sample data dir)
+│   ├── _fakes.py                     # fake `geneva` module + FakeConn/FakeTable
+│   └── test_*.py                     # unit tests + CliRunner wiring smoke tests
+├── reports/                          # author-only PDF write-ups (reportlab; macOS fonts; not packaged)
+├── studio_data/                      # UDF Studio sample-data dir (media gitignored; input.csv tracked)
+├── config-example.yaml              # config.yaml template — copy and fill in
+├── pyproject.toml                    # deps, cluster pins, Gemfury indexes, ruff/ty/pytest/coverage config
+├── Makefile                          # dev tasks: install, check, audit, lint, format, test, typecheck…
+├── CONTRIBUTING.md                   # setup, conventions, how to add a UDF or stage
+├── SECURITY.md                       # security policy
+└── .github/
+    ├── workflows/ci.yml              # lint + format + tests/coverage + ty + pip-audit + secret scan
+    └── dependabot.yml                # weekly dep + actions updates (cluster pins ignored)
 ```
 
 ## Requirements
 
 - Python ≥ 3.12 and [`uv`](https://docs.astral.sh/uv/).
-- A LanceDB Cloud API key + region, and a reachable Geneva host URL.
+- A LanceDB Enterprise API key + region, and a reachable Geneva host URL.
 - A GPU-backed Geneva runtime for the embed/caption/openpose stages — those
   models run **remotely** in the Geneva workers, not on your machine.
 
@@ -77,6 +150,23 @@ uv sync
 `geneva`, `lancedb`, and `pylance` are pinned betas served from public Gemfury
 indexes (declared in [`pyproject.toml`](pyproject.toml)); `uv` resolves them
 automatically — no extra flags.
+
+### Two tiers of version pins
+
+There are **two independent** sets of versions, and they are deliberately not the
+same thing:
+
+1. **The client/driver env** — `pyproject.toml` + `uv.lock`, what runs on your
+   machine. Refresh it with `uv lock --upgrade` (the `==` cluster pins for
+   `geneva`/`lancedb`/`pylance` hold; everything else moves to latest).
+2. **The remote-worker runtime** — the `*_RUNTIME_PIP` manifests in
+   [`geneva_examples/udfs/`](geneva_examples/udfs/), the pip set each Geneva
+   worker installs. `geneva`/`lancedb`/`pylance` there track the installed
+   client versions via `package_spec()` (so client and cluster match), but
+   `torch`/`transformers`/`pyarrow`/… are **exact-pinned independently** for
+   reproducible worker builds. Bumping the client lock does **not** change them
+   — edit the `*_PACKAGE_SPEC` defaults (or set the matching env var) when you
+   want the GPU workers on newer versions.
 
 ## Configure
 
@@ -92,23 +182,28 @@ cp config-example.yaml config.yaml
 
 | Key               | Required | Default           | Description                                  |
 | ----------------- | -------- | ----------------- | -------------------------------------------- |
-| `lancedb_api_key` | **yes**  | —                 | LanceDB Cloud API key.                       |
-| `lancedb_region`  | **yes**  | —                 | LanceDB Cloud region.                        |
+| `lancedb_api_key` | **yes**  | —                 | LanceDB Enterprise API key.                  |
+| `lancedb_region`  | **yes**  | —                 | LanceDB Enterprise region.                   |
 | `geneva_host`     | **yes**  | —                 | Reachable Geneva runtime URL (load balancer).|
 | `db_uri`          | no       | `db://quickstart` | Database URI, shared by every CLI.           |
-| `table_name`      | no       | `images`          | Table name, shared by every CLI.             |
 | `s3_*`            | no       | —                 | S3 storage creds (all four or none).         |
 | `hf_token`        | no       | —                 | Hugging Face token (raises HF rate limits).  |
 
 A missing `config.yaml`, or one missing any required field, fails with a clear
 error.
 
+Table names aren't config — each CLI declares its own `--table-name` default
+(`images` for the image workflow, `videos`/`video_clips` for video, `pdfs` for
+PDFs). Pass `--table-name` (or `--table` on `stats`) to point a command
+elsewhere.
+
 ## Image workflow
 
 ```bash
 uv run ingest-images   # create the table + load images from a Hugging Face dataset
 uv run lightweight     # backfill file_size + dimensions (CPU)
-uv run embed           # backfill OpenCLIP embeddings + a text-to-image search demo (GPU)
+uv run embed           # backfill OpenCLIP embeddings (GPU); runs a local text-to-image
+                       # search demo after — add --no-search-demo to skip (no driver torch)
 uv run caption         # backfill two BLIP caption variants (GPU)
 ```
 
@@ -150,13 +245,20 @@ explode into a per-chunk table. Prototype a PDF function first in UDF Studio
 ## Inspecting state
 
 ```bash
-uv run stats              # summarize tables: row counts, schema, populated feature columns
-uv run jobs               # list active (PENDING/RUNNING) Geneva backfill jobs
-uv run jobs --all         # include DONE/FAILED/CANCELLED
-uv run jobs kill <job_id> # cancel a Geneva job by id
+uv run stats                   # summarize images, videos, video_clips: rows, schema, feature columns
+uv run stats --table pdfs      # summarize a specific table (repeatable)
+
+uv run jobs                    # list active (PENDING/RUNNING) backfill jobs
+uv run jobs --all              # include DONE/FAILED/CANCELLED
+uv run jobs --table images     # filter by table; --status filters by exact state
+uv run jobs show <job_id>      # full record for one job (--full-events for the whole log)
+uv run jobs tail <job_id>      # follow a job's events until it reaches a terminal state
+uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if already terminal)
 ```
 
-Both connect via `config.yaml` (override with `--config`/`--db-uri`).
+`stats` defaults to the example tables (`images`, `videos`, `video_clips`) and
+skips any that are absent. Both CLIs connect via `config.yaml` (override with
+`--config`/`--db-uri`).
 
 ## UDF Studio
 
@@ -166,8 +268,13 @@ Pick a template, point it at sample data on disk, and run your function
 
 ```bash
 uv run udf-studio                 # http://127.0.0.1:7860, samples from ./studio_data
-uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib --host 0.0.0.0
+uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib
 ```
+
+> **Security.** Studio runs the code in the editor **in-process with no
+> sandbox** — keep it on the default loopback bind (`127.0.0.1`). `--host
+> 0.0.0.0` or `--share` exposes arbitrary code execution to anyone who can reach
+> the port; only use them on a network you trust.
 
 - **Contract.** A UDF defines `transform(value)` (one input → one output); a
   chunker defines `chunk(value)` that yields one `dict` per output row. Code at
@@ -207,12 +314,24 @@ tuned for the example datasets:
 ## Development
 
 ```bash
-make install   # sync deps + install the pre-commit hook
-make check     # lint + format-check + tests (the CI gate)
-make test      # pytest with coverage
+make install     # sync deps + install the pre-commit hook
+make check       # lint + format-check + tests (the CI gate)
+make test        # pytest with coverage (90% gate, enforced via pyproject)
+make typecheck   # ty (preview type checker; non-blocking)
+make audit       # pip-audit the locked deps for CVEs (mirrors CI)
 ```
 
-Tests exercise the UDF manifests, the pure helpers, config loading, the
-`stats`/`jobs` formatting helpers, and the stage CLI wiring (mocked). See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow and how to add a new
-UDF or stage.
+Run `make help` for the full target list.
+
+Tests run without a cluster, GPU, or model weights: the Geneva boundary is
+mocked (`tests/_fakes.py`) and heavy libraries are imported lazily. They cover
+the pure helpers, config loading, the UDF manifests and lightweight UDFs/chunkers
+run for real, the `stats`/`jobs` formatting helpers, and every CLI's wiring via
+`typer`'s `CliRunner` — the ingest, chunk, stage, cleanup, and `jobs kill`
+commands all have mocked smoke tests. Coverage is gated at 90% (CI also renders a
+per-file coverage table into the run summary).
+
+CI (`.github/workflows/ci.yml`) runs ruff lint + format, the test/coverage gate,
+a non-blocking `ty` pass, a `pip-audit` dependency scan, and a TruffleHog secret
+scan. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for conventions and how to add a
+new UDF or stage.

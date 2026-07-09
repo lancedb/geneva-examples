@@ -7,6 +7,7 @@ import os
 import uuid
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-def _local_caption_preview(table: object, model_id: str) -> None:
+def _local_caption_preview(table: Any, model_id: str) -> None:
     """Run BLIP locally on one image as a sanity check."""
     import torch
     from PIL import Image
@@ -31,7 +32,7 @@ def _local_caption_preview(table: object, model_id: str) -> None:
     processor = BlipProcessor.from_pretrained(model_id)
     model = BlipForConditionalGeneration.from_pretrained(model_id)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    model.to(device)  # ty: ignore[invalid-argument-type]  # third-party stub gap
     img = Image.open(BytesIO(row[0]["image"])).convert("RGB")
     inputs = {k: v.to(device) for k, v in processor([img], return_tensors="pt").items()}
     out = model.generate(**inputs, max_length=50)
@@ -45,7 +46,7 @@ def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
     log_level: str = typer.Option("INFO", help="Logging level."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str | None = typer.Option(None, help="Override config table_name."),
+    table_name: str = typer.Option("images", help="Table to operate on."),
     batch_size: int = typer.Option(1024, help="DataLoader batch size."),
     num_workers: int = typer.Option(8, help="DataLoader worker processes."),
     num_cpus: float = typer.Option(8.0, help="CPUs per model task."),
@@ -74,15 +75,13 @@ def run(
     cfg = load_config(config)
     if db_uri:
         cfg.db_uri = db_uri
-    if table_name:
-        cfg.table_name = table_name
     resolved_gpus = num_gpus if num_gpus is not None else 1.0
 
     logger.info("geneva_version %s", geneva.__version__)
-    logger.info("db_uri %s table %s", cfg.db_uri, cfg.table_name)
+    logger.info("db_uri %s table %s", cfg.db_uri, table_name)
 
     conn = connect(cfg)
-    table = conn.open_table(cfg.table_name)
+    table = conn.open_table(table_name)
 
     if caption_local_preview:
         _local_caption_preview(table, "Salesforce/blip-image-captioning-base")
@@ -110,7 +109,7 @@ def run(
         table = backfill_column(
             conn=conn,
             table=table,
-            table_name=cfg.table_name,
+            table_name=table_name,
             column=column,
             udf=_make_udf(),
             concurrency=concurrency,
