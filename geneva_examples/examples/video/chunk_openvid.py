@@ -51,7 +51,7 @@ def run(
     blob_column: str = "video_blob",
     pointer_column: str = "openvid_rowid",
     chunk_seconds: float = 1.0,
-    concurrency: int = 48,
+    concurrency: int = 4,
     checkpoint_size: int = 32,
     source_task_size: int | None = None,
     num_cpus: float = 1.0,
