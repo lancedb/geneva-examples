@@ -25,6 +25,9 @@ app = typer.Typer(add_completion=False, help=__doc__)
 @app.command()
 def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("INFO", help="Logging level."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     videos_table: str = typer.Option("videos", help="Videos table to drop."),
@@ -40,9 +43,10 @@ def run(
     setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
-    cfg = load_config(config)
+    cfg = load_config(config, mode_override=mode)
     if db_uri:
         cfg.db_uri = db_uri
+    location = cfg.local_db_path if cfg.is_local else cfg.db_uri
 
     # Preserve order while de-duplicating (e.g. if videos_table == clips_table).
     candidates = [
@@ -58,7 +62,7 @@ def run(
         if name not in targets:
             targets.append(name)
 
-    typer.echo(f"About to drop the following tables from {cfg.db_uri}:")
+    typer.echo(f"About to drop the following tables from {location}:")
     for name in targets:
         typer.echo(f"  - {name}")
     if not yes:

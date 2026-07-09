@@ -1,0 +1,18 @@
+# Files Ray must NOT package into a runtime_env working_dir upload.
+# Local backfills run on local Ray and never need the working dir, but if Ray's
+# uv-run integration is ever enabled these large/generated paths would blow past
+# Ray's 512 MiB working_dir limit. Mirrors .gitignore's heavy entries.
+.venv/
+.git/
+huggingface_cache/
+local_db/
+video_cache/
+udf_library/
+studio_data/
+reports/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml

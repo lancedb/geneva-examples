@@ -1,6 +1,8 @@
 # --- Project-specific ---
 # secrets + connection; copy from config-example.yaml
 config.yaml
+# local-mode on-disk Lance database (geneva.connect against a Path)
+local_db/
 # local MP4 download cache (ingest-videos)
 video_cache/
 # local PDF ingest directory (ingest-pdfs --pdf-dir default)
@@ -89,3 +91,6 @@ ipython_config.py
 # --- OS cruft ---
 .DS_Store
 Thumbs.db
+
+# Hugging Face dataset/model cache (HF_HOME default for local ingest)
+huggingface_cache/

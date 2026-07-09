@@ -34,15 +34,17 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from pathlib import Path
 
-import typer
-
-from geneva_examples.core.common import connect, memory_request_bytes, setup_logging
-from geneva_examples.core.config import load_config
+from geneva_examples.core.backfill import backfill_column
+from geneva_examples.core.common import (
+    connect,
+    format_sample,
+    resolve_resources,
+    runtime_session,
+)
+from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
-from geneva_examples.pipeline.stages._runner import backfill_column
-from geneva_examples.udfs.chunkers import (
+from geneva_examples.examples.video.chunkers import (
     GENEVA_PACKAGE_SPEC,
     LANCEDB_PACKAGE_SPEC,
     PYARROW_PACKAGE_SPEC,
@@ -51,7 +53,6 @@ from geneva_examples.udfs.chunkers import (
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(add_completion=False, help=__doc__)
 
 # A constant-returning UDF needs only the base runtime (geneva + lance + arrow),
 # no decode/model deps — a lean env that builds fast on the workers.
@@ -180,82 +181,48 @@ def build_constant_bytes_udf(
     return _constant_bytes
 
 
-@app.command()
 def run(
-    config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
-    log_level: str = typer.Option("INFO", help="Logging level."),
-    db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    clips_table: str = typer.Option("video_clips", help="Target clips table."),
-    source_table: str = typer.Option("videos", help="Source videos table."),
-    num_rows: int = typer.Option(100_000, help="Number of identical rows to write."),
-    include_clip_bytes: bool = typer.Option(
-        True,
-        help="Also replicate the clip_bytes column. Disable (~16x smaller/faster) "
-        "if downstream only reads `frame`.",
-    ),
-    seed_clip_table: str | None = typer.Option(
-        None,
-        help="Reuse a clip from this existing clips table instead of decoding "
-        "locally (must have a `frame` column).",
-    ),
-    source_video_id: str | None = typer.Option(
-        None,
-        help="Pick this source video_id as the basis (default: first source row).",
-    ),
-    openvid_uri: str = typer.Option(
-        "hf://datasets/lance-format/openvid-lance/data",
-        help="Base URI holding the OpenVid lance dataset (a '<table>.lance' dir).",
-    ),
-    openvid_table: str = typer.Option(
-        "train", help="OpenVid dataset name (resolves to <uri>/<table>.lance)."
-    ),
-    blob_column: str = typer.Option(
-        "video_blob", help="Blob column in the source dataset to read clips from."
-    ),
-    pointer_column: str = typer.Option(
-        "openvid_rowid", help="Source-row pointer column in the videos table."
-    ),
-    chunk_seconds: float = typer.Option(1.0, help="Seed clip length in seconds."),
-    read_retries: int = typer.Option(
-        8, help="Attempts to read the seed blob (rides out HF rate limits)."
-    ),
-    read_retry_sleep_s: float = typer.Option(
-        45.0, help="Base sleep (s) between seed-blob read attempts (linear backoff)."
-    ),
-    concurrency: int = typer.Option(16, help="Backfill concurrency."),
-    task_size: int = typer.Option(1024, help="Rows per read task."),
-    checkpoint_size: int = typer.Option(
-        256, help="Rows per UDF __call__ / commit (bounds per-task output memory)."
-    ),
-    num_cpus: float = typer.Option(1.0, help="CPUs per backfill task."),
-    memory_gib: int = typer.Option(
-        1, help="Memory (GiB) per backfill task (geneva caps <2)."
-    ),
-    backfill_timeout_min: int = typer.Option(1000, help="Per-backfill timeout (min)."),
-    flush_interval_s: float = typer.Option(30.0, help="Checkpoint flush interval (s)."),
-    schema_wait_attempts: int = typer.Option(30, help="Schema-visibility attempts."),
-    schema_wait_sleep_s: int = typer.Option(2, help="Seconds between schema checks."),
-    table_write_retries: int = typer.Option(5, help="Retries for create/add ops."),
-    table_write_retry_sleep_s: float = typer.Option(
-        2.0, help="Base sleep (seconds) between table-write retries."
-    ),
+    cfg: Config,
+    *,
+    clips_table: str = "video_clips",
+    source_table: str = "videos",
+    num_rows: int = 100_000,
+    include_clip_bytes: bool = True,
+    seed_clip_table: str | None = None,
+    source_video_id: str | None = None,
+    openvid_uri: str = "hf://datasets/lance-format/openvid-lance/data",
+    openvid_table: str = "train",
+    blob_column: str = "video_blob",
+    pointer_column: str = "openvid_rowid",
+    chunk_seconds: float = 1.0,
+    read_retries: int = 8,
+    read_retry_sleep_s: float = 45.0,
+    concurrency: int = 16,
+    task_size: int = 1024,
+    checkpoint_size: int = 256,
+    num_cpus: float = 1.0,
+    memory_gib: int = 1,
+    backfill_timeout_min: int = 1000,
+    flush_interval_s: float = 30.0,
+    schema_wait_attempts: int = 30,
+    schema_wait_sleep_s: int = 2,
+    table_write_retries: int = 5,
+    table_write_retry_sleep_s: float = 2.0,
 ) -> None:
     """Replicate one clip into N identical rows of ``clips_table``."""
-    setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
     if num_rows < 1:
-        raise typer.BadParameter("--num-rows must be at least 1")
+        raise ValueError("num_rows must be at least 1")
 
     import geneva
     import pyarrow as pa
-    from geneva.manifest import GenevaManifest
 
-    cfg = load_config(config)
-    if db_uri:
-        cfg.db_uri = db_uri
+    num_cpus, _, memory_bytes = resolve_resources(
+        cfg, num_cpus=num_cpus, num_gpus=None, memory_gib=memory_gib
+    )
 
-    logger.info("geneva_version %s", geneva.__version__)
+    logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info(
         "db_uri %s clips %s num_rows %d include_clip_bytes %s",
         cfg.db_uri,
@@ -277,10 +244,10 @@ def run(
             seed_rows = seed_src.search(None).select(seed_cols).limit(1).to_list()
         except Exception as exc:
             logger.error("could_not_read_seed_table %s: %s", seed_clip_table, exc)
-            raise typer.Exit(code=1) from exc
+            raise SystemExit(1) from exc
         if not seed_rows or not seed_rows[0].get("frame"):
             logger.error("no_seed_clip in %s", seed_clip_table)
-            raise typer.Exit(code=1)
+            raise SystemExit(1)
         seed = seed_rows[0]
         frame_bytes = bytes(seed["frame"])
         clip_bytes = (
@@ -309,7 +276,7 @@ def run(
                 else f"source table {source_table} is empty"
             )
             logger.error("no_source_row: %s", hint)
-            raise typer.Exit(code=1)
+            raise SystemExit(1)
         rid = int(rows[0][pointer_column])
         logger.info(
             "basis_row video_id=%s %s=%d", rows[0].get("video_id"), pointer_column, rid
@@ -334,7 +301,7 @@ def run(
                 rid,
                 exc,
             )
-            raise typer.Exit(code=1) from exc
+            raise SystemExit(1) from exc
         chunk_id = 0
         clip_bytes = clip_full if (include_clip_bytes and clip_full) else None
 
@@ -382,12 +349,19 @@ def run(
         clips_table,
     )
 
-    # 3) Backfill the heavy columns with constant-returning UDFs (cluster-side).
-    #    Stable manifest name so the worker env is reused across runs.
-    manifest = (
-        GenevaManifest.create_pip("seed-video-clips-rt").pip(BASE_RUNTIME_PIP).build()
-    )
-    memory_bytes = memory_request_bytes(memory_gib)
+    # 3) Backfill the heavy columns with constant-returning UDFs. Locally these
+    #    run on local Ray with no manifest; in enterprise mode a stable manifest
+    #    name lets the worker env be reused across runs.
+    if cfg.is_local:
+        manifest = None
+    else:
+        from geneva.manifest import GenevaManifest
+
+        manifest = (
+            GenevaManifest.create_pip("seed-video-clips-rt")
+            .pip(BASE_RUNTIME_PIP)
+            .build()
+        )
 
     def _do_backfill(column: str, payload: bytes) -> None:
         udf = build_constant_bytes_udf(
@@ -415,21 +389,20 @@ def run(
             wait_sleep_s=schema_wait_sleep_s,
         )
 
-    _do_backfill("frame", frame_bytes)
-    if clip_bytes is not None:
-        _do_backfill("clip_bytes", clip_bytes)
+    with runtime_session(conn, cfg):
+        _do_backfill("frame", frame_bytes)
+        if clip_bytes is not None:
+            _do_backfill("clip_bytes", clip_bytes)
 
     logger.info("clips_rows %s", table.count_rows())
     logger.info("clips_table_columns %s", table.schema.names)
     logger.info(
-        "clips_sample %s",
-        table.search()
-        .select(["video_id", "chunk_id", "start_sec", "end_sec"])
-        .limit(5)
-        .to_list(),
+        "clips_sample\n%s",
+        format_sample(
+            table.search()
+            .select(["video_id", "chunk_id", "start_sec", "end_sec"])
+            .limit(5)
+            .to_list()
+        ),
     )
     logger.info("seed_video_clips_ok")
-
-
-if __name__ == "__main__":
-    app()

@@ -94,10 +94,15 @@ class FakeConn:
     """
 
     def __init__(
-        self, table: FakeTable | None = None, tables: dict[str, FakeTable] | None = None
+        self,
+        table: FakeTable | None = None,
+        tables: dict[str, FakeTable] | None = None,
+        *,
+        is_remote: bool = True,
     ) -> None:
         self._table = table
         self._tables = tables or {}
+        self._is_remote = is_remote
         self.created: dict[str, FakeTable] = {}
         self.dropped: list[str] = []
 
@@ -128,6 +133,14 @@ class FakeConn:
 
     def table_names(self) -> list[str]:
         return list(self._tables) or list(self.created)
+
+    def is_remote(self) -> bool:
+        return self._is_remote
+
+    def local_ray_context(self):  # pragma: no cover - trivial context manager
+        import contextlib
+
+        return contextlib.nullcontext()
 
 
 class FakeManifest:

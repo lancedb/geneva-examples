@@ -1,4 +1,8 @@
-"""Shared single-column backfill orchestration for stage CLIs."""
+"""Shared single-column backfill orchestration for example pipeline steps.
+
+Formerly ``pipeline/stages/_runner.py``; moved here as shared infra now that the
+stages live inside self-contained example packages.
+"""
 
 from __future__ import annotations
 
@@ -46,15 +50,36 @@ def backfill_column(
         sleep_s=wait_sleep_s,
     )
 
+    # The local (NativeTable) and remote (RemoteConnection) backfill APIs differ:
+    # local runs on local Ray and has no `task_size`/`use_cpu_only_pool`/
+    # `checkpoint_size` — the checkpoint knob is `max_checkpoint_size`, and the
+    # worker-pool routing is remote-only.
+    is_remote = bool(conn.is_remote())
+    if is_remote:
+        backfill_kwargs = dict(
+            task_size=task_size,
+            checkpoint_size=checkpoint_size,
+            use_cpu_only_pool=use_cpu_only_pool,
+        )
+    else:
+        # Local Ray has only this machine's cores. Cap concurrency (leaving a core
+        # for the raylet/driver) and skip admission pre-flight so tasks queue for a
+        # free slot instead of the job being rejected up front.
+        from geneva_examples.core.common import local_concurrency
+
+        concurrency = local_concurrency(concurrency)
+        backfill_kwargs = dict(
+            max_checkpoint_size=checkpoint_size,
+            _admission_check=False,
+        )
+
     start = time.perf_counter()
     job = table.backfill(
         column,
         concurrency=concurrency,
-        task_size=task_size,
-        checkpoint_size=checkpoint_size,
         batch_checkpoint_flush_interval_seconds=flush_interval_s,
-        use_cpu_only_pool=use_cpu_only_pool,
         timeout=timedelta(minutes=timeout_min),
+        **backfill_kwargs,
     )
     logger.info("job %s %s", column, job.job_id)
     logger.info("backfill_seconds %s %s", column, round(time.perf_counter() - start, 3))

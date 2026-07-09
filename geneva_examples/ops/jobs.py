@@ -24,14 +24,17 @@ _TERMINAL = {"DONE", "FAILED", "CANCELLED"}
 
 
 def _open_connection(
-    config: Path | None, db_uri: str | None, log_level: str
+    config: Path | None,
+    db_uri: str | None,
+    log_level: str,
+    mode: str | None = None,
 ) -> tuple[Config, Any]:
     """Resolve config, apply ``db_uri`` override, and open a Geneva connection."""
     setup_logging(log_level)
 
     import geneva  # noqa: F401  (ensure importable before connect)
 
-    cfg = load_config(config)
+    cfg = load_config(config, mode_override=mode)
     if db_uri:
         cfg.db_uri = db_uri
     return cfg, connect(cfg)
@@ -160,6 +163,9 @@ def _print_detail(jr: object, events_limit: int | None = 10) -> None:
 def list_jobs(
     ctx: typer.Context,
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("WARNING", help="Logging level (connection noise)."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     job_id: str | None = typer.Option(
@@ -184,7 +190,7 @@ def list_jobs(
     if ctx.invoked_subcommand is not None:
         return
 
-    cfg, conn = _open_connection(config, db_uri, log_level)
+    cfg, conn = _open_connection(config, db_uri, log_level, mode)
 
     if job_id:
         try:
@@ -234,6 +240,9 @@ def list_jobs(
 def show(
     job_id: str = typer.Argument(..., help="Job id to inspect."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("WARNING", help="Logging level (connection noise)."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     full_events: bool = typer.Option(
@@ -245,7 +254,7 @@ def show(
     Equivalent to the top-level ``--job-id`` option, but takes the id as a
     positional argument so you can run ``jobs show <id>``.
     """
-    cfg, conn = _open_connection(config, db_uri, log_level)
+    cfg, conn = _open_connection(config, db_uri, log_level, mode)
 
     try:
         jr = conn.get_job(job_id)
@@ -260,6 +269,9 @@ def show(
 def kill(
     job_id: str = typer.Argument(..., help="Job id to cancel."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("WARNING", help="Logging level (connection noise)."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     force: bool = typer.Option(
@@ -277,7 +289,7 @@ def kill(
     in-flight Ray tasks may keep going until they finish or time out, but the job
     will read as CANCELLED.
     """
-    cfg, conn = _open_connection(config, db_uri, log_level)
+    cfg, conn = _open_connection(config, db_uri, log_level, mode)
 
     try:
         jr = conn.get_job(job_id)
@@ -321,6 +333,9 @@ def kill(
 def tail(
     job_id: str = typer.Argument(..., help="Job id to tail."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("WARNING", help="Logging level (connection noise)."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     interval: float = typer.Option(2.0, help="Poll interval (seconds)."),
@@ -336,7 +351,7 @@ def tail(
     whenever the counters change. It exits once the job is DONE/FAILED/CANCELLED,
     or on Ctrl-C.
     """
-    cfg, conn = _open_connection(config, db_uri, log_level)
+    cfg, conn = _open_connection(config, db_uri, log_level, mode)
 
     try:
         jr = conn.get_job(job_id)

@@ -137,7 +137,7 @@ class _KillConn:
 
 def _patch_kill(monkeypatch, conn):
     monkeypatch.setattr(
-        jobs, "load_config", lambda _c: types.SimpleNamespace(db_uri="db://test")
+        jobs, "load_config", lambda _c, **_kw: types.SimpleNamespace(db_uri="db://test")
     )
     monkeypatch.setattr(jobs, "connect", lambda _cfg: conn)
 

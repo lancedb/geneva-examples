@@ -24,7 +24,6 @@ _FEATURE_COLUMNS = (
     "caption",  # clips: frame-caption
     "pose",  # clips: frame-openpose
     "caption_blip",  # images: caption
-    "caption_blip_v2",  # images: caption
 )
 # Id-like columns, most specific first, used for the per-table id sample.
 _ID_COLUMNS = ("video_id", "image_id", "doc_id")
@@ -140,6 +139,9 @@ def _summarize_table(table: Any, sample: int, max_rows: int = 100_000) -> None:
 @app.command()
 def run(
     config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
+    mode: str | None = typer.Option(
+        None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    ),
     log_level: str = typer.Option("WARNING", help="Logging level (connection noise)."),
     db_uri: str | None = typer.Option(None, help="Override config db_uri."),
     table: list[str] = typer.Option(
@@ -157,13 +159,14 @@ def run(
 
     import geneva  # noqa: F401  (ensures geneva is importable before connect)
 
-    cfg = load_config(config)
+    cfg = load_config(config, mode_override=mode)
     if db_uri:
         cfg.db_uri = db_uri
 
     conn = connect(cfg)
 
-    typer.echo(f"db_uri: {cfg.db_uri}")
+    location = cfg.local_db_path if cfg.is_local else cfg.db_uri
+    typer.echo(f"mode: {cfg.mode}   location: {location}")
 
     for name in table or list(_DEFAULT_TABLES):
         typer.echo(f"\n[{name}]")

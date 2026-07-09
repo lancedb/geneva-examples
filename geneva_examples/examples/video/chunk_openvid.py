@@ -23,97 +23,58 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from pathlib import Path
 
-import typer
-
-from geneva_examples.core.common import connect, memory_request_bytes, setup_logging
-from geneva_examples.core.config import load_config
+from geneva_examples.core.common import (
+    connect,
+    format_sample,
+    local_concurrency,
+    resolve_resources,
+    runtime_session,
+)
+from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
-from geneva_examples.udfs.chunkers import VIDEO_RUNTIME_PIP, chunk_blob_video_udtf
+from geneva_examples.examples.video.chunkers import (
+    VIDEO_RUNTIME_PIP,
+    chunk_blob_video_udtf,
+)
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(add_completion=False, help=__doc__)
 
-
-@app.command()
 def run(
-    config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
-    log_level: str = typer.Option("INFO", help="Logging level."),
-    db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    source_table: str = typer.Option("videos", help="Source videos table."),
-    clips_table: str = typer.Option("video_clips", help="Output clips table."),
-    openvid_uri: str = typer.Option(
-        "hf://datasets/lance-format/openvid-lance/data",
-        help="Base URI holding the OpenVid lance dataset (a '<table>.lance' dir).",
-    ),
-    openvid_table: str = typer.Option(
-        "train", help="OpenVid dataset name (resolves to <uri>/<table>.lance)."
-    ),
-    blob_column: str = typer.Option(
-        "video_blob", help="Blob column in the source dataset to read clips from."
-    ),
-    pointer_column: str = typer.Option(
-        "openvid_rowid", help="Source-row pointer column in the videos table."
-    ),
-    chunk_seconds: float = typer.Option(1.0, help="Chunk length in seconds."),
-    concurrency: int = typer.Option(48, help="Refresh concurrency (tasks in flight)."),
-    checkpoint_size: int = typer.Option(
-        32, help="Max clip rows per output fragment (commit granularity)."
-    ),
-    source_task_size: int | None = typer.Option(
-        None,
-        help="Source video rows per chunker expansion task (geneva default 1024). "
-        "Smaller raises parallelism and lowers per-actor memory.",
-    ),
-    num_cpus: float = typer.Option(
-        1.0,
-        help="CPUs reserved per chunker task. concurrency*num_cpus is the total "
-        "CPU demand; when it exceeds one node's cores, Ray spreads tasks across "
-        "the fleet instead of packing them onto a single worker.",
-    ),
-    num_gpus: float = typer.Option(
-        0.0,
-        help="GPUs reserved per chunker task. The work is CPU-only, but a small "
-        "fraction (e.g. 0.1) pins tasks onto GPU worker nodes if they are fenced "
-        "to GPU-requesting tasks.",
-    ),
-    memory_gib: int = typer.Option(
-        1, help="Memory (GiB) per chunker task (geneva caps <2)."
-    ),
-    max_clips: int | None = typer.Option(
-        None, help="Cap clips per video (default: all)."
-    ),
-    max_video_s: float | None = typer.Option(
-        None, help="Skip videos longer than this many seconds."
-    ),
-    overwrite: bool = typer.Option(
-        True, help="Drop the clips table first if it already exists."
-    ),
-    table_write_retries: int = typer.Option(5, help="Retries for create/add ops."),
-    table_write_retry_sleep_s: float = typer.Option(
-        2.0, help="Base sleep (seconds) between table-write retries."
-    ),
-    read_retries: int = typer.Option(
-        4, help="Per-row attempts to read a video's blob from the source dataset."
-    ),
-    read_retry_sleep_s: float = typer.Option(
-        1.0, help="Base sleep (seconds) for blob-read backoff (doubles per retry)."
-    ),
+    cfg: Config,
+    *,
+    source_table: str = "videos",
+    clips_table: str = "video_clips",
+    openvid_uri: str = "hf://datasets/lance-format/openvid-lance/data",
+    openvid_table: str = "train",
+    blob_column: str = "video_blob",
+    pointer_column: str = "openvid_rowid",
+    chunk_seconds: float = 1.0,
+    concurrency: int = 48,
+    checkpoint_size: int = 32,
+    source_task_size: int | None = None,
+    num_cpus: float = 1.0,
+    num_gpus: float = 0.0,
+    memory_gib: int = 1,
+    max_clips: int | None = None,
+    max_video_s: float | None = None,
+    overwrite: bool = True,
+    table_write_retries: int = 5,
+    table_write_retry_sleep_s: float = 2.0,
+    read_retries: int = 4,
+    read_retry_sleep_s: float = 1.0,
 ) -> None:
     """Chunk the videos table into a standalone clips table (1s clips)."""
-    setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
     import geneva
-    from geneva.manifest import GenevaManifest
 
-    cfg = load_config(config)
-    if db_uri:
-        cfg.db_uri = db_uri
+    num_cpus, num_gpus, memory_bytes = resolve_resources(
+        cfg, num_cpus=num_cpus, num_gpus=num_gpus, memory_gib=memory_gib
+    )
 
-    logger.info("geneva_version %s", geneva.__version__)
+    logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info(
         "db_uri %s source %s clips %s chunk_seconds %s",
         cfg.db_uri,
@@ -151,12 +112,22 @@ def run(
         logger.info("hf_token present; workers will authenticate to HF")
     else:
         logger.info("no hf_token configured; workers read HF anonymously")
-    manifest = (
-        GenevaManifest.create_pip(f"video-chunking-{uuid.uuid4().hex[:6]}")
-        .pip([*VIDEO_RUNTIME_PIP, "huggingface-hub>=0.24"])
-        .env_vars(worker_env)
-        .build()
-    )
+
+    if cfg.is_local:
+        # Local Ray workers share the driver's environment, so there is no remote
+        # manifest to attach `env_vars` to — set the HF vars here in-process.
+        for key, value in worker_env.items():
+            os.environ.setdefault(key, value)
+        manifest = None
+    else:
+        from geneva.manifest import GenevaManifest
+
+        manifest = (
+            GenevaManifest.create_pip(f"video-chunking-{uuid.uuid4().hex[:6]}")
+            .pip([*VIDEO_RUNTIME_PIP, "huggingface-hub>=0.24"])
+            .env_vars(worker_env)
+            .build()
+        )
     dataset_uri = f"{openvid_uri.rstrip('/')}/{openvid_table}.lance"
     logger.info("source_dataset %s blob_column %s", dataset_uri, blob_column)
     udtf = chunk_blob_video_udtf(
@@ -167,7 +138,7 @@ def run(
         manifest=manifest,
         num_cpus=num_cpus,
         num_gpus=num_gpus,
-        memory_bytes=memory_request_bytes(memory_gib),
+        memory_bytes=memory_bytes,
         max_video_s=max_video_s,
         num_clips=max_clips,
         read_retries=read_retries,
@@ -193,24 +164,28 @@ def run(
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )
-    view.refresh(
-        concurrency=concurrency,
-        max_rows_per_fragment=checkpoint_size,
-        source_task_size=source_task_size,
-    )
+    refresh_kwargs: dict = {}
+    if cfg.is_local:
+        concurrency = local_concurrency(concurrency)
+        refresh_kwargs["_admission_check"] = False
+    with runtime_session(conn, cfg):
+        view.refresh(
+            concurrency=concurrency,
+            max_rows_per_fragment=checkpoint_size,
+            source_task_size=source_task_size,
+            **refresh_kwargs,
+        )
     view.checkout_latest()
 
     logger.info("chunk_rows %s", view.count_rows())
     logger.info("clips_table_columns %s", view.schema.names)
     logger.info(
-        "clips_sample %s",
-        view.search()
-        .select(["video_id", "chunk_id", "start_sec", "end_sec"])
-        .limit(5)
-        .to_list(),
+        "clips_sample\n%s",
+        format_sample(
+            view.search()
+            .select(["video_id", "chunk_id", "start_sec", "end_sec"])
+            .limit(5)
+            .to_list()
+        ),
     )
     logger.info("chunk_videos_openvid_ok")
-
-
-if __name__ == "__main__":
-    app()

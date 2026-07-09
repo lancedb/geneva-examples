@@ -1,0 +1,31 @@
+# Enterprise-mode config for the Geneva quickstart CLIs.
+#
+# Copy to config.yaml and fill in (config.yaml is gitignored). Enterprise mode
+# runs Geneva against LanceDB Cloud (db://…) + a remote Geneva runtime, which
+# executes the UDF backfills on remote (GPU-backed) workers.
+#
+# `mode: enterprise` is optional — the CLIs also infer enterprise mode whenever
+# `geneva_host` is set. All three cloud fields below are required in this mode.
+
+mode: "enterprise"
+
+# --- Required ---
+lancedb_api_key: "your-lancedb-api-key"
+lancedb_region: "us-east-1"
+geneva_host: "http://<elb-host>:10024"
+
+# --- Connection target (shared across ingest + stage CLIs) ---
+# Table names aren't config — each CLI has its own --table-name default.
+db_uri: "db://quickstart"
+
+# --- S3-compatible storage credentials (optional; all four or none) ---
+# s3_access_key: "your-s3-access-key"
+# s3_secret_key: "your-s3-secret-key"
+# s3_endpoint: "https://s3.us-east-1.amazonaws.com"
+# s3_region: "us-east-1"
+# aws_allow_http: "false"
+
+# --- Hugging Face ---
+# Optional token for reading hf:// datasets; injected into the chunker workers'
+# env as HF_TOKEN when set.
+# hf_token: "hf_..."

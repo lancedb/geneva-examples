@@ -7,7 +7,7 @@ into a stage. Work in progress can be saved to a local LanceDB library.
 
 This app never submits to the cluster or builds a Geneva manifest — it executes
 your edited code in this process so the iterate loop is fast. Promoting a
-finished function into a real ``@geneva.udf`` factory under ``geneva_examples/udfs/`` and a
+finished function into a real ``@geneva.udf`` factory under ``geneva_examples/examples/<domain>/`` and a
 stage CLI stays a manual step.
 
 .. warning::
