@@ -99,8 +99,8 @@ dev = [
     "pre-commit>=4.6.0",
     "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.18",
-    "ty>=0.0.50",
+    "ruff>=0.15.21",
+    "ty>=0.0.57",
 ]
 
 [tool.ruff]
