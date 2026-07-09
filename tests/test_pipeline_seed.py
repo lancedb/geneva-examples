@@ -7,7 +7,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from geneva_examples.pipeline import seed_video_clips
+from geneva_examples.examples.video import seed as seed_video_clips
 
 
 def test_build_constant_bytes_udf_returns_payload():

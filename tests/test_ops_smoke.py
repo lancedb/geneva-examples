@@ -26,14 +26,20 @@ def test_stats_cli_summarizes_tables(
     )
     conn = FakeConn(tables={"videos": videos, "video_clips": clips})
 
-    cfg = types.SimpleNamespace(db_uri="db://test", table_name="images")
-    monkeypatch.setattr(stats, "load_config", lambda _config: cfg)
+    cfg = types.SimpleNamespace(
+        mode="enterprise",
+        is_local=False,
+        db_uri="db://test",
+        local_db_path="./local_db",
+        table_name="images",
+    )
+    monkeypatch.setattr(stats, "load_config", lambda _config, **_kw: cfg)
     monkeypatch.setattr(stats, "connect", lambda _cfg: conn)
 
     result = CliRunner().invoke(stats.app, [])
 
     assert result.exit_code == 0, result.output
-    assert "db_uri: db://test" in result.output
+    assert "location: db://test" in result.output
     assert "[videos]" in result.output
     assert "[video_clips]" in result.output
 
@@ -44,8 +50,14 @@ def test_stats_cli_reports_missing_table(
     # A connection that has no tables -> open_table raises -> "(table not found)".
     conn = FakeConn()
 
-    cfg = types.SimpleNamespace(db_uri="db://test", table_name="images")
-    monkeypatch.setattr(stats, "load_config", lambda _config: cfg)
+    cfg = types.SimpleNamespace(
+        mode="enterprise",
+        is_local=False,
+        db_uri="db://test",
+        local_db_path="./local_db",
+        table_name="images",
+    )
+    monkeypatch.setattr(stats, "load_config", lambda _config, **_kw: cfg)
     monkeypatch.setattr(stats, "connect", lambda _cfg: conn)
 
     result = CliRunner().invoke(stats.app, [])

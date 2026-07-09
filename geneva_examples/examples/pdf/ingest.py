@@ -10,52 +10,32 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
-import typer
-
-from geneva_examples.core.common import connect, setup_logging
-from geneva_examples.core.config import load_config
+from geneva_examples.core.common import connect, format_sample
+from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(add_completion=False, help=__doc__)
 
-
-@app.command()
 def run(
-    config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
-    log_level: str = typer.Option("INFO", help="Logging level."),
-    db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str = typer.Option("pdfs", help="Target table name."),
-    pdf_dir: str = typer.Option(
-        "./pdf_data", help="Local directory of *.pdf files to ingest."
-    ),
-    frag_size: int = typer.Option(
-        1, help="PDFs per record batch (1 = one fragment per PDF)."
-    ),
-    overwrite: bool = typer.Option(
-        True, help="Drop the table first if it already exists."
-    ),
-    table_write_retries: int = typer.Option(5, help="Retries for create/add ops."),
-    table_write_retry_sleep_s: float = typer.Option(
-        2.0, help="Base sleep (seconds) between table-write retries."
-    ),
+    cfg: Config,
+    *,
+    table_name: str = "pdfs",
+    pdf_dir: str = "./studio_data/pdfs",
+    frag_size: int = 1,
+    overwrite: bool = True,
+    table_write_retries: int = 5,
+    table_write_retry_sleep_s: float = 2.0,
 ) -> None:
     """Load the PDFs under ``--pdf-dir`` into the table."""
-    setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
     import geneva
 
     from geneva_examples.core.utils.pdfs import load_pdf_batches
 
-    cfg = load_config(config)
-    if db_uri:
-        cfg.db_uri = db_uri
-
-    logger.info("geneva_version %s", geneva.__version__)
+    logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info("db_uri %s table %s pdf_dir %s", cfg.db_uri, table_name, pdf_dir)
 
     conn = connect(cfg)
@@ -94,11 +74,7 @@ def run(
     except Exception:  # noqa: BLE001
         pass
     logger.info(
-        "initial_sample %s",
-        table.search().select(["doc_id"]).limit(5).to_list(),
+        "initial_sample\n%s",
+        format_sample(table.search().select(["doc_id"]).limit(5).to_list()),
     )
     logger.info("ingest_pdfs_ok")
-
-
-if __name__ == "__main__":
-    app()

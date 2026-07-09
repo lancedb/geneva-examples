@@ -38,23 +38,37 @@ Useful targets (see `make help`): `make lint-fix`, `make format`, `make test`,
   ships to the remote workers. Nest its imports and helpers *inside* the factory
   function so they serialize with it; keep the driver/CLI code lightweight.
 
-## Adding a new UDF
+## Adding a new example
+
+Examples are self-contained packages under
+[`geneva_examples/examples/`](geneva_examples/examples/). Each declares a **spec**
+(`Example` → `Step`s → `Param`s) that both the generated CLIs and the TUI render,
+so params and descriptions are defined once.
 
 1. **Prototype in UDF Studio.** Run `uv run udf-studio`, pick a template, point it
    at sample data in `studio_data/`, and iterate on your `transform(value)` (UDF)
    or `chunk(value)` (chunker) locally — no cluster, GPU, or Ray. See the
    [README](README.md#udf-studio).
-2. **Add a factory + manifest.** Create a module in
-   [`geneva_examples/udfs/`](geneva_examples/udfs/) following
-   [`imageinfo.py`](geneva_examples/udfs/imageinfo.py): export a `build_*_udf(...)`
-   factory and a `*_RUNTIME_PIP` list pinning the worker-side packages
-   (env-overridable, like `GENEVA_PACKAGE_SPEC`).
-3. **Wire a stage CLI.** Add a Typer CLI under
-   [`geneva_examples/pipeline/stages/`](geneva_examples/pipeline/stages/) modeled on
-   [`lightweight.py`](geneva_examples/pipeline/stages/lightweight.py): load config,
-   `connect`, build a `GenevaManifest`, build the UDF(s), and call the shared
-   [`backfill_column()`](geneva_examples/pipeline/stages/_runner.py) runner. Add a
-   `project.scripts` entry in `pyproject.toml`.
+2. **Add the UDF factory + manifest.** In your example package (new or existing),
+   add a UDF module following
+   [`examples/images/imageinfo.py`](geneva_examples/examples/images/imageinfo.py):
+   a `build_*_udf(...)` factory and a `*_RUNTIME_PIP` list pinning the worker-side
+   packages (env-overridable, like `GENEVA_PACKAGE_SPEC`). Shared model UDFs go in
+   [`examples/_shared/`](geneva_examples/examples/_shared/).
+3. **Add a step run-function.** Write `run(cfg: Config, *, ...) -> None` modeled on
+   [`examples/images/lightweight.py`](geneva_examples/examples/images/lightweight.py):
+   `connect(cfg)`, `build_manifest(cfg, ...)` (→ `None` locally), build the UDF(s)
+   via `resolve_resources(cfg, ...)`, and call
+   [`backfill_column()`](geneva_examples/core/backfill.py) inside
+   `runtime_session(conn, cfg)`. Heavy imports stay nested inside `run`.
+4. **Declare the spec.** In the example's `__init__.py`, add a `Step` (title +
+   markdown description + `params=params_from_signature(run, help=...)`), and list
+   it on the `Example`. Register a brand-new example in
+   [`examples/__init__.py`](geneva_examples/examples/__init__.py) — the TUI picks
+   it up automatically.
+5. **Expose the CLI.** Add a `build_command(...)` binding in
+   [`examples/cli.py`](geneva_examples/examples/cli.py) and a `project.scripts`
+   entry in `pyproject.toml`.
 
 ## Testing & the coverage policy
 
@@ -66,11 +80,15 @@ cluster, GPU, or model weights are listed in `[tool.coverage.run] omit` in
 When you add code:
 
 - Unit-test pure helpers directly (see `tests/test_udfs.py`,
-  `tests/test_pipeline_runner.py`, `tests/test_ops_*.py`).
+  `tests/test_pipeline_runner.py`, `tests/test_spec.py`, `tests/test_ops_*.py`).
+- Registry + spec invariants live in `tests/test_registry.py` /
+  `tests/test_spec.py`; TUI behavior in `tests/test_tui.py` (Textual pilot) and
+  `tests/test_tui_forms.py`.
 - For CLI *wiring* that would otherwise hit a cluster, add a mocked smoke test in
-  the style of [`tests/test_pipeline_smoke.py`](tests/test_pipeline_smoke.py): use
-  `typer.testing.CliRunner` and monkeypatch `load_config`/`connect` plus an
-  injected fake `geneva` module.
+  the style of [`tests/test_pipeline_smoke.py`](tests/test_pipeline_smoke.py):
+  drive the generated command from `geneva_examples.examples.cli` with `click`'s
+  `CliRunner` in `--mode local`, monkeypatch the step module's `connect`, and (for
+  model steps) use the injected fake `geneva` module.
 - Reuse the synthetic-media fixtures in `tests/conftest.py`
   (`make_png`, `make_mp4`, `data_dir`).
 

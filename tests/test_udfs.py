@@ -1,4 +1,4 @@
-"""Tests for the reusable Geneva callables in geneva_examples/udfs.
+"""Tests for the reusable Geneva callables in the example packages.
 
 The geneva-decorated UDFs/chunkers are callable on the driver, so the
 lightweight ones (imageinfo, the video chunker) run for real here. The heavy
@@ -12,8 +12,10 @@ import importlib
 
 import pytest
 
-from geneva_examples.udfs import blip, chunkers, clip, imageinfo, openpose
-from geneva_examples.udfs import pdf as pdf_udfs
+from geneva_examples.examples._shared import blip, clip
+from geneva_examples.examples.images import imageinfo
+from geneva_examples.examples.pdf import document as pdf_udfs
+from geneva_examples.examples.video import chunkers, openpose
 
 
 def test_file_size_udf_runs():

@@ -18,51 +18,28 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
-import typer
-
-from geneva_examples.core.common import connect, setup_logging
-from geneva_examples.core.config import load_config
+from geneva_examples.core.common import connect, format_sample
+from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(add_completion=False, help=__doc__)
 
-
-@app.command()
 def run(
-    config: Path | None = typer.Option(None, "--config", help="Path to config.yaml."),
-    log_level: str = typer.Option("INFO", help="Logging level."),
-    db_uri: str | None = typer.Option(None, help="Override config db_uri."),
-    table_name: str = typer.Option("videos", help="Target table name."),
-    limit: int = typer.Option(
-        256, help="Max OpenVid rows to ingest (first N in scan order)."
-    ),
-    batch_size: int = typer.Option(
-        256, help="Rows per streamed record batch (bounds client memory)."
-    ),
-    openvid_uri: str = typer.Option(
-        "hf://datasets/lance-format/openvid-lance/data",
-        help="Base URI holding the OpenVid lance dataset (a '<table>.lance' dir).",
-    ),
-    openvid_table: str = typer.Option(
-        "train", help="OpenVid dataset name (resolves to <uri>/<table>.lance)."
-    ),
-    skip_null_video: bool = typer.Option(
-        True, help="Drop rows whose video bytes are null."
-    ),
-    overwrite: bool = typer.Option(
-        False, help="Drop the table first if it already exists."
-    ),
-    table_write_retries: int = typer.Option(5, help="Retries for create/add ops."),
-    table_write_retry_sleep_s: float = typer.Option(
-        2.0, help="Base sleep (seconds) between table-write retries."
-    ),
+    cfg: Config,
+    *,
+    table_name: str = "videos",
+    limit: int = 256,
+    batch_size: int = 256,
+    openvid_uri: str = "hf://datasets/lance-format/openvid-lance/data",
+    openvid_table: str = "train",
+    skip_null_video: bool = True,
+    overwrite: bool = False,
+    table_write_retries: int = 5,
+    table_write_retry_sleep_s: float = 2.0,
 ) -> None:
     """Stream OpenVid rows into the configured videos table."""
-    setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     os.environ.setdefault("HF_HOME", "./huggingface_cache")
 
@@ -74,10 +51,6 @@ def run(
         normalize_openvid_reference_batch,
     )
 
-    cfg = load_config(config)
-    if db_uri:
-        cfg.db_uri = db_uri
-
     # Reference-only ingest: scan with the *default* blob handling so `video_blob`
     # stays a descriptor (struct<position,size> — no bytes pulled to the client),
     # and request `with_row_id=True` so each row's stable `_rowid` is captured as
@@ -85,7 +58,7 @@ def run(
     # blob directly on the cluster.
     dataset_uri = f"{openvid_uri.rstrip('/')}/{openvid_table}.lance"
 
-    logger.info("geneva_version %s", geneva.__version__)
+    logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info(
         "db_uri %s table %s source %s limit %s",
         cfg.db_uri,
@@ -151,11 +124,9 @@ def run(
     except Exception:  # noqa: BLE001
         pass
     logger.info(
-        "initial_sample %s",
-        table.search().select(["video_id", "openvid_rowid"]).limit(5).to_list(),
+        "initial_sample\n%s",
+        format_sample(
+            table.search().select(["video_id", "openvid_rowid"]).limit(5).to_list()
+        ),
     )
     logger.info("ingest_videos_openvid_ok")
-
-
-if __name__ == "__main__":
-    app()

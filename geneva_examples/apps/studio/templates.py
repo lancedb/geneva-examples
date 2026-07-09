@@ -2,7 +2,7 @@
 
 Each is runnable as-is under the Studio's contract (see :mod:`.runner`):
 ``transform(value)`` for UDFs, ``chunk(value)`` for chunkers. They mirror the
-real factories in :mod:`geneva_examples.udfs` so a working prototype maps cleanly onto a
+real factories in :mod:`geneva_examples.examples` so a working prototype maps cleanly onto a
 ``@geneva.udf`` / ``@geneva.chunker`` when it's time to wire it into a stage.
 """
 
@@ -92,7 +92,7 @@ TEMPLATES: dict[str, dict] = {
             """Chunker: split a video into fixed-length windows.
 
             Yields one row per window. This prototype emits window bounds; the
-            production chunker (geneva_examples/udfs/chunkers.py) also re-encodes the clip
+            production chunker (geneva_examples/examples/video/chunkers.py) also re-encodes the clip
             and extracts a start frame.
             """
             CHUNK_SECONDS = 10.0
@@ -165,7 +165,7 @@ TEMPLATES: dict[str, dict] = {
             """Chunker: extract PDF text and split it into overlapping chunks.
 
             Mirrors the production path (geneva.udfs.document.pdf_embedding, reused
-            in geneva_examples/udfs/pdf.py): pypdf per-page text -> LangChain
+            in geneva_examples/examples/pdf/document.py): pypdf per-page text -> LangChain
             RecursiveCharacterTextSplitter -> one row per chunk. The production
             UDFs keep chunks as a nested list per PDF row; here we yield one row
             per chunk so you can eyeball each one.

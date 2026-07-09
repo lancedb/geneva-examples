@@ -1,0 +1,19 @@
+# Local-mode config for the Geneva quickstart CLIs.
+#
+# Copy to config.yaml (gitignored) — or skip it entirely: with no config.yaml,
+# the CLIs default to local mode anyway. Local mode runs Geneva against an
+# on-disk Lance database with backfills on a local Ray instance. No cloud
+# account, no cluster, no secrets.
+#
+# You can also force local mode per-command with `--mode local` regardless of
+# what config.yaml says.
+
+mode: "local"
+
+# On-disk directory for the local Lance database (created automatically).
+local_db_path: "./local_db"
+
+# Table names aren't config — each CLI has its own --table-name default.
+
+# Optional: raises Hugging Face download rate limits during ingest.
+# hf_token: "hf_..."
