@@ -53,7 +53,7 @@ class _Conn:
         return self._is_remote
 
 
-def _run(table, *, is_remote=True, reset=True):
+def _run(table, *, is_remote=True, reset=True, cluster=None):
     sentinel_udf = object()
     return _runner.backfill_column(
         conn=_Conn(table, is_remote=is_remote),
@@ -69,6 +69,7 @@ def _run(table, *, is_remote=True, reset=True):
         wait_attempts=3,
         wait_sleep_s=0,
         reset=reset,
+        cluster=cluster,
     ), sentinel_udf
 
 
@@ -89,8 +90,17 @@ def test_backfill_column_happy_path_enterprise():
     assert bf["timeout"] == timedelta(minutes=30)
     assert "max_checkpoint_size" not in bf
     assert "_admission_check" not in bf
+    # Remote dispatch routes to a unique per-job cluster (auto-generated from
+    # table+column) so concurrent jobs don't collide under ephemeral clusters.
+    assert bf["cluster"].startswith("video-clips-embedding-")
     assert table.calls["checkout"] is True
     assert table.calls["count_where"] == "`embedding` IS NULL"
+
+
+def test_backfill_column_honors_explicit_cluster():
+    table = _Table(["video_id", "embedding"])
+    _run(table, cluster="my-fixed-cluster")
+    assert table.calls["backfill"]["cluster"] == "my-fixed-cluster"
 
 
 def test_backfill_column_local_uses_native_kwargs():
@@ -104,6 +114,8 @@ def test_backfill_column_local_uses_native_kwargs():
     assert "task_size" not in bf
     assert "use_cpu_only_pool" not in bf
     assert "checkpoint_size" not in bf
+    # cluster override is remote-only; not passed for native backfill.
+    assert "cluster" not in bf
     # Local concurrency is capped to the machine's core count.
     assert bf["concurrency"] <= 16
     assert bf["batch_checkpoint_flush_interval_seconds"] == 2.0

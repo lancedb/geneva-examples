@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 import pytest
 
@@ -67,6 +68,30 @@ def test_memory_request_bytes_normal():
 def test_memory_request_bytes_caps_to_32bit(caplog):
     capped = common.memory_request_bytes(4)  # 4 GiB > 2**31-1
     assert capped == 2**31 - 1
+
+
+_RFC1123 = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?")
+
+
+def test_unique_cluster_name_is_rfc1123_sanitized_and_unique():
+    a = common.unique_cluster_name("Video_Clips/1k")
+    b = common.unique_cluster_name("Video_Clips/1k")
+    assert _RFC1123.fullmatch(a)  # lowercase alnum + dashes, valid ends
+    assert a.startswith("video-clips-1k-")  # sanitized prefix preserved
+    assert a != b  # unique random suffix per call
+    assert len(a) <= 63
+
+
+def test_unique_cluster_name_truncates_long_prefix():
+    name = common.unique_cluster_name("x" * 200)
+    assert len(name) <= 63
+    assert _RFC1123.fullmatch(name)
+
+
+def test_unique_cluster_name_empty_prefix_falls_back():
+    name = common.unique_cluster_name("///")
+    assert name.startswith("geneva-")
+    assert _RFC1123.fullmatch(name)
 
 
 # --- mode-aware helpers ------------------------------------------------------
