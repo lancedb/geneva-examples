@@ -15,11 +15,13 @@ from geneva_examples.core.spec import (
 )
 from geneva_examples.examples.video import (
     chunk,
+    chunk_external_video,
     chunk_openvid,
     frame_caption,
     frame_embed,
     frame_openpose,
     ingest,
+    ingest_external_refs,
     ingest_openvid,
     seed,
 )
@@ -55,6 +57,36 @@ INGEST_OPENVID = Step(
             "openvid_uri": "Base URI holding the OpenVid lance dataset.",
             "openvid_table": "OpenVid dataset name (<uri>/<table>.lance).",
             "skip_null_video": "Drop rows whose video bytes are null.",
+        },
+    ),
+)
+
+INGEST_EXTERNAL = Step(
+    key="ingest-videos-external",
+    title="Ingest videos (external refs, reference-only)",
+    description=(
+        "Enumerate an S3-compatible video bucket and write a reference-only "
+        "`videos` table (video_id + video_uri + size_mb, no bytes). The "
+        "chunk-videos-external step reads each URI on the worker."
+    ),
+    run=ingest_external_refs.run,
+    params=params_from_signature(
+        ingest_external_refs.run,
+        help=COMMON_HELP
+        | {
+            "video_bucket": "Video bucket name (or VIDEO_S3_BUCKET).",
+            "video_endpoint": "S3 endpoint URL — required, e.g. a non-AWS S3 service (or VIDEO_S3_ENDPOINT).",
+            "video_access_key": "Video-bucket access key (or VIDEO_S3_ACCESS_KEY).",
+            "video_secret_key": "Video-bucket secret key (or VIDEO_S3_SECRET_KEY).",
+            "video_region": "SigV4 region (or VIDEO_S3_REGION).",
+            "prefix": "Only list keys under this prefix.",
+            "suffix": "Only keep keys with this suffix.",
+            "limit": "Max videos to register (0 = all).",
+            "smallest_first": "Register the smallest N first (handy for spikes).",
+            "sample": (
+                "Selection mode: '' (smallest_first/listing order) or 'stride' "
+                "— a systematic sample across the size distribution (representative)."
+            ),
         },
     ),
 )
@@ -103,6 +135,35 @@ CHUNK_OPENVID = Step(
     ),
 )
 
+CHUNK_EXTERNAL = Step(
+    key="chunk-videos-external",
+    title="Chunk videos (external refs)",
+    description=(
+        "Chunk the reference-only URI `videos` table into clips, reading each "
+        "video from its S3 URI on the worker with the video token."
+    ),
+    run=chunk_external_video.run,
+    requires="run ingest-videos-external first",
+    params=params_from_signature(
+        chunk_external_video.run,
+        help=COMMON_HELP
+        | {
+            "uri_column": "URI pointer column in the videos table.",
+            "video_endpoint": "S3 endpoint URL — required, e.g. a non-AWS S3 service (or VIDEO_S3_ENDPOINT).",
+            "video_access_key": "Video-bucket access key (or VIDEO_S3_ACCESS_KEY).",
+            "video_secret_key": "Video-bucket secret key (or VIDEO_S3_SECRET_KEY).",
+            "video_region": "SigV4 region (or VIDEO_S3_REGION).",
+            "source_task_size": "Source rows per chunker task (1 = fan out per video).",
+            "max_clips": "Cap clips per video (default: all).",
+            "max_video_s": "Skip videos longer than this many seconds.",
+            "max_video_mb": "Skip videos larger than this many MB (guards actor RAM).",
+            "read_retries": "Per-video read attempts.",
+            "read_retry_sleep_s": "Base sleep (s) for read backoff.",
+            "detach": "Submit and return a job id without waiting (enterprise only).",
+        },
+    ),
+)
+
 FRAME_EMBED = Step(
     key="frame-embed",
     title="OpenCLIP embeddings on frames",
@@ -117,6 +178,11 @@ FRAME_EMBED = Step(
             "model_name": "OpenCLIP architecture.",
             "pretrained": "OpenCLIP pretrained tag for --model-name.",
             "dim": "Embedding dimension; MUST match --model-name.",
+            "reset": (
+                "Drop and recompute the whole embedding column (destructive). "
+                "Default off = incremental: only embed clips still missing it, "
+                "so it is safe to run alongside a chunk job and to re-run."
+            ),
         },
     ),
 )
@@ -181,8 +247,10 @@ EXAMPLE = Example(
     steps=(
         INGEST,
         INGEST_OPENVID,
+        INGEST_EXTERNAL,
         CHUNK,
         CHUNK_OPENVID,
+        CHUNK_EXTERNAL,
         FRAME_EMBED,
         FRAME_CAPTION,
         FRAME_OPENPOSE,

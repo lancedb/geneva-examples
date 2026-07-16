@@ -39,8 +39,16 @@ def run(
     flush_interval_s: float = 30.0,
     schema_wait_attempts: int = 30,
     schema_wait_sleep_s: int = 2,
+    reset: bool = False,
 ) -> None:
-    """Add an OpenCLIP embedding column to the frames table."""
+    """Add an OpenCLIP embedding column to the frames table.
+
+    By default the backfill is **incremental**: it only embeds clips whose
+    ``embedding`` is still null, so it is safe to run repeatedly and to overlap
+    with a chunk job that keeps appending new clips (each pass picks up whatever
+    landed since the last one). Pass ``reset=True`` (``--reset``) to drop the
+    column and recompute every row — e.g. after switching ``--model-name``.
+    """
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
     import geneva
@@ -102,5 +110,6 @@ def run(
             timeout_min=backfill_timeout_min,
             wait_attempts=schema_wait_attempts,
             wait_sleep_s=schema_wait_sleep_s,
+            reset=reset,
         )
     logger.info("frame_embed_ok")

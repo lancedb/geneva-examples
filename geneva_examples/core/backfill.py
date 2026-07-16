@@ -34,21 +34,48 @@ def backfill_column(
     wait_attempts: int,
     wait_sleep_s: int,
     use_cpu_only_pool: bool = False,
+    reset: bool = True,
 ) -> TableLike:
-    """Drop/add ``column`` backed by ``udf``, wait for it, backfill, and log."""
-    try:
-        table.drop_columns([column])
-    except Exception:  # noqa: BLE001
-        pass
+    """Add ``column`` backed by ``udf``, wait for it, backfill, and log.
 
-    table.add_columns({column: udf})
-    table = wait_for_columns(
-        conn=conn,
-        table_name=table_name,
-        required={column},
-        attempts=wait_attempts,
-        sleep_s=wait_sleep_s,
-    )
+    ``reset`` controls what happens when the column already exists:
+
+    - ``True`` (default): **drop and recompute**. The column is dropped so
+      ``add_columns`` re-binds it to the current ``udf`` and the backfill
+      recomputes every row. Destructive — wipes prior values — but guarantees
+      the whole column reflects the current UDF/model. This is a *schema change*,
+      so it must not run concurrently with another job appending rows to the
+      same table.
+    - ``False``: **incremental**. Keep the existing column and fill only the
+      rows still missing it (``table.backfill`` defaults to ``<column> IS NULL``),
+      using the column's already-registered UDF. Safe to run repeatedly — each
+      pass picks up whatever rows landed since the last one. On first run (column
+      absent) both modes behave identically. NOTE: this cannot overlap with a job
+      still *appending* rows to the same table — adding the column is a schema
+      change that breaks the producer's schema-matched appends, so run this only
+      once the producer (e.g. a chunk refresh) has finished.
+    """
+    column_exists = column in set(table.schema.names)
+    if reset and column_exists:
+        # Explicit rebuild requested: drop so add_columns rebinds to the current
+        # UDF and the backfill below recomputes every row. Tolerate a drop that
+        # fails (e.g. the column vanished between the check and here) — add_columns
+        # then surfaces any real problem.
+        try:
+            table.drop_columns([column])
+        except Exception:  # noqa: BLE001
+            pass
+        column_exists = False
+
+    if not column_exists:
+        table.add_columns({column: udf})
+        table = wait_for_columns(
+            conn=conn,
+            table_name=table_name,
+            required={column},
+            attempts=wait_attempts,
+            sleep_s=wait_sleep_s,
+        )
 
     # The local (NativeTable) and remote (RemoteConnection) backfill APIs differ:
     # local runs on local Ray and has no `task_size`/`use_cpu_only_pool`/
@@ -73,6 +100,12 @@ def backfill_column(
             _admission_check=False,
         )
 
+    # Both modes rely on the column's registered UDF binding (set by add_columns
+    # above), never a backfill(udf=...) override — that override is not supported
+    # for remote/enterprise connections (backfill_async raises NotImplementedError;
+    # you'd have to alter_columns() first). Consequence: an incremental re-run
+    # (reset=False) on a pre-existing column keeps that column's original UDF for
+    # the null rows. To swap the UDF/model, use reset=True to rebuild the column.
     start = time.perf_counter()
     job = table.backfill(
         column,
