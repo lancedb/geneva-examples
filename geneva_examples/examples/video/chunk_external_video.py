@@ -30,7 +30,6 @@ from geneva_examples.core.common import (
     local_concurrency,
     resolve_resources,
     runtime_session,
-    unique_cluster_name,
 )
 from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
@@ -168,11 +167,6 @@ def run(
     if cfg.is_local:
         concurrency = local_concurrency(concurrency)
         refresh_kwargs["_admission_check"] = False
-    else:
-        # Route this refresh to its own uniquely-named per-job Ray cluster so
-        # concurrent jobs don't collide on the fixed default name (see
-        # unique_cluster_name). Applies to both refresh() and refresh_async().
-        refresh_kwargs["cluster"] = unique_cluster_name(clips_table)
 
     if detach and cfg.is_local:
         # A detached local refresh runs in the driver's Ray, which

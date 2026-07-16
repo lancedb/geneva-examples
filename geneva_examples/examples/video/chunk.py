@@ -30,7 +30,6 @@ from geneva_examples.core.common import (
     local_concurrency,
     resolve_resources,
     runtime_session,
-    unique_cluster_name,
 )
 from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
@@ -117,10 +116,6 @@ def run(
     if cfg.is_local:
         concurrency = local_concurrency(concurrency)
         refresh_kwargs["_admission_check"] = False
-    else:
-        # Unique per-job cluster name so concurrent jobs don't collide on the
-        # fixed default under per-job ephemeral RayClusters (ignored locally).
-        refresh_kwargs["cluster"] = unique_cluster_name(clips_table)
     with runtime_session(conn, cfg):
         view.refresh(
             concurrency=concurrency,

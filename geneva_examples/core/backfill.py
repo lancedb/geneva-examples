@@ -11,7 +11,6 @@ import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from geneva_examples.core.common import unique_cluster_name
 from geneva_examples.core.utils.tables import wait_for_columns
 
 if TYPE_CHECKING:
@@ -36,7 +35,6 @@ def backfill_column(
     wait_sleep_s: int,
     use_cpu_only_pool: bool = False,
     reset: bool = True,
-    cluster: str | None = None,
 ) -> TableLike:
     """Add ``column`` backed by ``udf``, wait for it, backfill, and log.
 
@@ -89,11 +87,6 @@ def backfill_column(
             task_size=task_size,
             checkpoint_size=checkpoint_size,
             use_cpu_only_pool=use_cpu_only_pool,
-            # Route this job to its own uniquely-named Ray cluster. With per-job
-            # ephemeral clusters (deployment `rayclusterUri` unset), the fixed
-            # default name would make concurrent jobs collide on one cluster; a
-            # unique name per job gives each its own. Ignored for native/local.
-            cluster=cluster or unique_cluster_name(f"{table_name}-{column}"),
         )
     else:
         # Local Ray has only this machine's cores. Cap concurrency (leaving a core

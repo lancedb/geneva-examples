@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import uuid
 import warnings
 from contextlib import AbstractContextManager, nullcontext
@@ -120,24 +119,6 @@ def memory_request_bytes(gib: float) -> int:
         )
         return _MEMORY_MAX_BYTES
     return requested
-
-
-def unique_cluster_name(prefix: str) -> str:
-    """Build an RFC-1123 cluster name unique to this job invocation.
-
-    With per-job ephemeral RayClusters (``rayclusterUri`` unset on the
-    deployment), the driver bootstraps a cluster named by this ``cluster``
-    override. geneva's default name is *fixed*, so two jobs running at once would
-    collide on one shared cluster — whichever finishes first tears it down under
-    the other. A unique name per job gives each its own cluster. Passed as the
-    remote ``cluster=`` override (ignored for local/native connections).
-
-    The name is sanitized to RFC-1123 (lowercase alphanumeric + ``-``, <=63
-    chars, starts/ends alphanumeric) and suffixed with a short random token.
-    """
-    base = re.sub(r"[^a-z0-9-]+", "-", prefix.lower()).strip("-")
-    base = base[:54].strip("-") or "geneva"
-    return f"{base}-{uuid.uuid4().hex[:8]}"
 
 
 def connect(config: Config):
