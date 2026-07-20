@@ -41,3 +41,50 @@ def test_chunk_cli_creates_and_refreshes_view(
     # overwrite=True dropped the clips table, then the view was created under it.
     assert "video_clips" in conn.dropped
     assert "video_clips" in conn.created
+
+
+# All five worker-env keys, preset so the local-mode ``os.environ.setdefault``
+# pass is a no-op (monkeypatch can then restore the ambient environment).
+_VIDEO_ENV = {
+    "VIDEO_S3_ENDPOINT": "http://minio.test:9000",
+    "VIDEO_S3_ACCESS_KEY": "ak",
+    "VIDEO_S3_SECRET_KEY": "sk",
+    "VIDEO_S3_SCHEME": "http",
+    "VIDEO_S3_REGION": "us-east-1",
+}
+
+
+def test_chunk_external_cli_creates_and_refreshes_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from geneva_examples.examples.video import chunk_external_video as mod
+
+    for key, value in _VIDEO_ENV.items():
+        monkeypatch.setenv(key, value)
+    table = FakeTable(names=["video_id", "video_uri"])
+    conn = FakeConn(table=table, is_remote=False)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    monkeypatch.setattr(mod, "runtime_session", lambda *_a, **_k: nullcontext())
+
+    result = CliRunner().invoke(cli.chunk_videos_external, ["--mode", "local"])
+
+    assert result.exit_code == 0, result.output
+    assert "video_clips" in conn.dropped
+    assert "video_clips" in conn.created
+
+
+def test_chunk_external_cli_requires_video_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from geneva_examples.examples.video import chunk_external_video as mod
+
+    for key in (*_VIDEO_ENV, "VIDEO_S3_BUCKET"):
+        monkeypatch.delenv(key, raising=False)
+    conn = FakeConn(table=FakeTable(), is_remote=False)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+
+    result = CliRunner().invoke(cli.chunk_videos_external, ["--mode", "local"])
+
+    assert result.exit_code != 0
+    assert "missing video-bucket credentials" in str(result.exception)
+    assert "video_clips" not in conn.created  # failed before touching the table
