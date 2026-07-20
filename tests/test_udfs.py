@@ -16,6 +16,8 @@ import types
 import pytest
 
 from geneva_examples.examples._shared import blip, clip
+from geneva_examples.examples.audio import transcribe as audio_transcribe
+from geneva_examples.examples.audio import tts as audio_tts
 from geneva_examples.examples.images import imageinfo
 from geneva_examples.examples.pdf import document as pdf_udfs
 from geneva_examples.examples.video import chunkers, chunkers_uri, openpose
@@ -42,6 +44,8 @@ def test_dimensions_udf_runs(make_png_bytes):
         (openpose.OPENPOSE_RUNTIME_PIP, "controlnet"),
         (chunkers.VIDEO_RUNTIME_PIP, "av"),
         (pdf_udfs.PDF_RUNTIME_PIP, "pypdf"),
+        (audio_tts.MMS_TTS_RUNTIME_PIP, "transformers"),
+        (audio_transcribe.WHISPER_RUNTIME_PIP, "transformers"),
     ],
 )
 def test_runtime_pip_lists_are_well_formed(runtime_pip, expected_substr):

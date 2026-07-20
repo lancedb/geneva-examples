@@ -11,11 +11,12 @@ without importing torch/geneva (those load lazily inside ``run``/factory bodies)
 from __future__ import annotations
 
 from geneva_examples.core.spec import Example, Step
+from geneva_examples.examples.audio import EXAMPLE as AUDIO
 from geneva_examples.examples.images import EXAMPLE as IMAGES
 from geneva_examples.examples.pdf import EXAMPLE as PDF
 from geneva_examples.examples.video import EXAMPLE as VIDEO
 
-EXAMPLES: tuple[Example, ...] = (IMAGES, VIDEO, PDF)
+EXAMPLES: tuple[Example, ...] = (IMAGES, VIDEO, PDF, AUDIO)
 
 
 def all_examples() -> tuple[Example, ...]:
