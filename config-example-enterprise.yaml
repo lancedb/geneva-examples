@@ -18,12 +18,27 @@ geneva_host: "http://<elb-host>:10024"
 # Table names aren't config — each CLI has its own --table-name default.
 db_uri: "db://quickstart"
 
-# --- S3-compatible storage credentials (optional; all four or none) ---
+# --- Storage-bucket credentials (optional; all four or none) ---
+# The connection's `storage_options`: the token that reads/writes the .lance
+# data files in the LanceDB storage bucket (enterprise table writes are
+# client-side). This token is NOT used for the assets bucket below.
 # s3_access_key: "your-s3-access-key"
 # s3_secret_key: "your-s3-secret-key"
 # s3_endpoint: "https://s3.us-east-1.amazonaws.com"
 # s3_region: "us-east-1"
 # aws_allow_http: "false"
+
+# --- Assets-bucket credentials (optional; all four or none) ---
+# A separate (typically bucket-scoped) token for the raw-video assets bucket
+# used by the external-refs video steps (`ingest-videos-external` /
+# `chunk-videos-external`), which enumerate and stream videos straight from
+# S3-compatible storage. Overridable per-command with the --video-* flags.
+# Use a full http:// URL for a plain-HTTP endpoint (bare hosts default to
+# https).
+# assets_s3_access_key: "your-assets-access-key"
+# assets_s3_secret_key: "your-assets-secret-key"
+# assets_s3_endpoint: "https://s3.us-east-1.amazonaws.com"
+# assets_s3_region: "us-east-1"
 
 # --- Hugging Face ---
 # Optional token for reading hf:// datasets; injected into the chunker workers'
