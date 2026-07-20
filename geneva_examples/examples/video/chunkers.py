@@ -9,6 +9,16 @@ re-encoded ``clip_bytes`` and a 512px JPEG of the window's first ``frame``:
     dataset via a lightweight pointer column, so the source table stays
     reference-only (metadata + pointer, no bytes).
 
+Failures never silently drop a source row: both chunkers carry a nullable
+``errors: list<string>`` column (null on clean rows, never an empty list). A
+whole-video failure yields one row with null window fields and the error
+message(s); a per-window failure yields the window's row with the failed value
+null. Each message leads with a stable class tag (``blob_read_failed[1/4]:``,
+``decode_failed:``, ``skipped:max_video_s(...)``, ...) so failures group in
+SQL, and blob-read retries record one message per failed attempt. Consumers
+that want only playable clips filter ``clip_bytes IS NOT NULL``; fully clean
+rows are ``errors IS NULL``.
+
 Like the UDF factories in this package, the chunkers are fully self-contained
 (all imports and helpers nested in the closure) because this module is **not**
 importable on the remote Geneva runtime — only the manifest's pip packages are.
@@ -63,6 +73,7 @@ def chunk_video_udtf(
             pa.field("end_sec", pa.float32()),
             pa.field("clip_bytes", pa.large_binary()),
             pa.field("frame", pa.large_binary()),
+            pa.field("errors", pa.list_(pa.string())),
         ]
     )
 
@@ -88,9 +99,26 @@ def chunk_video_udtf(
         # Runs in the remote Geneva runtime; helpers are nested so they ship with
         # the marshalled function (this module is not importable remotely).
         import io
+        import logging
 
         import av
         from PIL import Image
+
+        log = logging.getLogger("geneva.chunk_video")
+
+        def _err(msgs, cid=None, start=None, end=None):
+            # One row accounting for a failure: window fields only when the
+            # failure is per-window, data columns null, messages tag-first.
+            if isinstance(msgs, str):
+                msgs = [msgs]
+            return {
+                "chunk_id": cid,
+                "start_sec": start,
+                "end_sec": end,
+                "clip_bytes": None,
+                "frame": None,
+                "errors": [str(m)[:2000] for m in msgs],
+            }
 
         def _clip_windows(duration, chunk_s, max_n=None):
             if duration <= 0 or chunk_s <= 0:
@@ -177,13 +205,33 @@ def chunk_video_udtf(
             return (out_buf.getvalue() if wrote else None), frame_bytes
 
         if video is None:
+            yield _err("video_null")
             return
-        dur = _probe_video(video)
+        try:
+            dur = _probe_video(video)
+        except Exception as e:  # noqa: BLE001 (corrupt bytes; error row + log)
+            log.warning(
+                "decode_failed (%d bytes): %s: %s", len(video), type(e).__name__, e
+            )
+            yield _err(f"decode_failed: {type(e).__name__}: {e}")
+            return
+        if dur <= 0:
+            yield _err("no_duration")
+            return
         if limit is not None and dur > limit:
+            yield _err(f"skipped:max_video_s({dur:.1f}s)")
             return
         for cid, (start, end) in enumerate(_clip_windows(dur, cs, max_n=max_clips)):
-            clip, frame = _encode_clip(video, start, end)
-            if clip is None:
+            try:
+                clip, frame = _encode_clip(video, start, end)
+            except Exception as e:  # noqa: BLE001 (one bad window; error row + log)
+                log.warning("encode_failed window=%d: %s", cid, e)
+                yield _err(
+                    f"encode_failed: {type(e).__name__}: {e}",
+                    cid=int(cid),
+                    start=float(start),
+                    end=float(end),
+                )
                 continue
             yield {
                 "chunk_id": int(cid),
@@ -191,6 +239,14 @@ def chunk_video_udtf(
                 "end_sec": float(end),
                 "clip_bytes": clip,
                 "frame": frame,
+                # Partial windows keep whatever decoded: a zero-packet remux is
+                # `empty_window` (frame may still be present), a clip with no
+                # decodable start frame is `no_start_frame`.
+                "errors": (
+                    ["empty_window"]
+                    if clip is None
+                    else (["no_start_frame"] if frame is None else None)
+                ),
             }
 
     return _chunk_video
@@ -231,6 +287,7 @@ def chunk_blob_video_udtf(
             pa.field("end_sec", pa.float32()),
             pa.field("clip_bytes", pa.large_binary()),
             pa.field("frame", pa.large_binary()),
+            pa.field("errors", pa.list_(pa.string())),
         ]
     )
 
@@ -272,6 +329,20 @@ def chunk_blob_video_udtf(
         from PIL import Image
 
         log = logging.getLogger("geneva.chunk_blob_video")
+
+        def _err(msgs, cid=None, start=None, end=None):
+            # One row accounting for a failure: window fields only when the
+            # failure is per-window, data columns null, messages tag-first.
+            if isinstance(msgs, str):
+                msgs = [msgs]
+            return {
+                "chunk_id": cid,
+                "start_sec": start,
+                "end_sec": end,
+                "clip_bytes": None,
+                "frame": None,
+                "errors": [str(m)[:2000] for m in msgs],
+            }
 
         def _clip_windows(duration, chunk_s, max_n=None):
             if duration <= 0 or chunk_s <= 0:
@@ -358,19 +429,20 @@ def chunk_blob_video_udtf(
             return (out_buf.getvalue() if wrote else None), frame_bytes
 
         if openvid_rowid is None:
+            yield _err("pointer_null")
             return
         rid = int(openvid_rowid)
 
         # Read this row's blob from the source dataset (a ranged read; bytes never
         # touch the client). Retry transient HF/network errors with exponential
         # backoff; the dataset handle is cached per worker and dropped on error so
-        # the next attempt reopens. Distinguish three outcomes so the cause is
-        # visible in worker logs instead of silently dropping the row:
-        #   - missing/empty blob  -> legitimate skip (debug)
-        #   - read failed         -> WARNING (transient/network/version)
-        #   - decode failed       -> WARNING (corrupt bytes)
+        # the next attempt reopens. Every failure outcome is recorded on an error
+        # row (and logged), never silently dropped:
+        #   - missing/empty blob  -> `blob_missing` / `blob_empty` (no retry)
+        #   - read failed         -> `blob_read_failed[i/N]`, one per attempt
+        #   - decode failed       -> `decode_failed` (corrupt bytes)
         video = None
-        last_err = None
+        attempt_errors = []
         for attempt in range(read_attempts):
             try:
                 ds = ds_cache.get("ds")
@@ -379,32 +451,37 @@ def chunk_blob_video_udtf(
                     ds_cache["ds"] = ds
                 blobs = ds.take_blobs(blob_col, ids=[rid])
                 if not blobs:
-                    log.debug("blob_missing rowid=%s; skipping", rid)
+                    log.debug("blob_missing rowid=%s", rid)
+                    yield _err("blob_missing")
                     return
                 with blobs[0] as bf:
                     if bf.size() == 0:
-                        log.debug("blob_empty rowid=%s; skipping", rid)
+                        log.debug("blob_empty rowid=%s", rid)
+                        yield _err("blob_empty")
                         return
                     video = bf.readall()
                 break
             except Exception as e:  # noqa: BLE001 (transient read; retry/log)
-                last_err = e
+                attempt_errors.append(
+                    f"blob_read_failed[{attempt + 1}/{read_attempts}]: "
+                    f"{type(e).__name__}: {e}"
+                )
                 ds_cache.pop("ds", None)
                 if attempt + 1 < read_attempts:
                     time.sleep(read_sleep * (2**attempt))
         if video is None:
             log.warning(
-                "blob_read_failed rowid=%s after %d attempts: %s: %s",
+                "blob_read_failed rowid=%s after %d attempts: %s",
                 rid,
                 read_attempts,
-                type(last_err).__name__,
-                last_err,
+                attempt_errors[-1] if attempt_errors else "?",
             )
+            yield _err(attempt_errors or ["blob_read_failed[0/0]: unknown"])
             return
 
         try:
             dur = _probe_video(video)
-        except Exception as e:  # noqa: BLE001 (corrupt bytes; log + skip)
+        except Exception as e:  # noqa: BLE001 (corrupt bytes; error row + log)
             log.warning(
                 "decode_failed rowid=%s (%d bytes): %s: %s",
                 rid,
@@ -412,17 +489,26 @@ def chunk_blob_video_udtf(
                 type(e).__name__,
                 e,
             )
+            yield _err(f"decode_failed: {type(e).__name__}: {e}")
             return
 
+        if dur <= 0:
+            yield _err("no_duration")
+            return
         if limit is not None and dur > limit:
+            yield _err(f"skipped:max_video_s({dur:.1f}s)")
             return
         for cid, (start, end) in enumerate(_clip_windows(dur, cs, max_n=max_clips)):
             try:
                 clip, frame = _encode_clip(video, start, end)
-            except Exception as e:  # noqa: BLE001 (one bad window; log + skip)
+            except Exception as e:  # noqa: BLE001 (one bad window; error row + log)
                 log.warning("encode_failed rowid=%s window=%d: %s", rid, cid, e)
-                continue
-            if clip is None:
+                yield _err(
+                    f"encode_failed: {type(e).__name__}: {e}",
+                    cid=int(cid),
+                    start=float(start),
+                    end=float(end),
+                )
                 continue
             yield {
                 "chunk_id": int(cid),
@@ -430,6 +516,14 @@ def chunk_blob_video_udtf(
                 "end_sec": float(end),
                 "clip_bytes": clip,
                 "frame": frame,
+                # Partial windows keep whatever decoded: a zero-packet remux is
+                # `empty_window` (frame may still be present), a clip with no
+                # decodable start frame is `no_start_frame`.
+                "errors": (
+                    ["empty_window"]
+                    if clip is None
+                    else (["no_start_frame"] if frame is None else None)
+                ),
             }
 
     return _chunk_blob_video

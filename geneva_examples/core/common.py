@@ -90,7 +90,12 @@ def format_sample(rows: list[dict[str, Any]], columns: list[str] | None = None) 
 
 
 def format_cell(value: Any) -> str:
-    """Compact, display-safe string for one table cell."""
+    """Compact, display-safe string for one table cell (at most 120 chars).
+
+    The cap matters for unbounded text — the TUI's table grid renders these
+    cells verbatim, and e.g. a clips `errors` entry carries a full exception
+    message.
+    """
     if value is None:
         return ""
     if isinstance(value, (bytes, bytearray)):
@@ -101,10 +106,12 @@ def format_cell(value: Any) -> str:
         n = len(value)
         if n > 8 and all(isinstance(x, (int, float)) for x in value):
             return f"[{n} floats]"
-        return f"[{n} items]" if n > 8 else repr(list(value))
-    if isinstance(value, dict):
-        return " ".join(f"{k}={v}" for k, v in value.items())
-    return str(value)
+        rendered = f"[{n} items]" if n > 8 else repr(list(value))
+    elif isinstance(value, dict):
+        rendered = " ".join(f"{k}={v}" for k, v in value.items())
+    else:
+        rendered = str(value)
+    return rendered if len(rendered) <= 120 else rendered[:119] + "…"
 
 
 def memory_request_bytes(gib: float) -> int:

@@ -49,6 +49,7 @@ ingest-videos-openvid = "geneva_examples.examples.cli:ingest_videos_openvid"
 ingest-pdfs = "geneva_examples.examples.cli:ingest_pdfs"
 chunk-videos = "geneva_examples.examples.cli:chunk_videos"
 chunk-videos-openvid = "geneva_examples.examples.cli:chunk_videos_openvid"
+chunk-videos-faults = "geneva_examples.examples.cli:chunk_videos_faults"
 chunk-pdfs = "geneva_examples.examples.cli:chunk_pdfs"
 seed-video-clips = "geneva_examples.examples.cli:seed_video_clips"
 lightweight = "geneva_examples.examples.cli:lightweight"
@@ -159,6 +160,7 @@ omit = [
     "geneva_examples/examples/*/ingest_openvid.py",
     "geneva_examples/examples/*/chunk.py",
     "geneva_examples/examples/*/chunk_openvid.py",
+    "geneva_examples/examples/*/chunk_faults.py",
     "geneva_examples/examples/*/seed.py",
     "geneva_examples/examples/images/lightweight.py",
     "geneva_examples/examples/images/embed.py",

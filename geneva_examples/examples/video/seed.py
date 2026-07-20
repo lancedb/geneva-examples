@@ -323,6 +323,9 @@ def run(
             "chunk_id": pa.array([chunk_id] * num_rows, type=pa.int32()),
             "start_sec": pa.array([start_sec] * num_rows, type=pa.float32()),
             "end_sec": pa.array([end_sec] * num_rows, type=pa.float32()),
+            # Chunker-produced clips tables carry an `errors` column; keep the
+            # seeded shape identical (all clean rows).
+            "errors": pa.array([None] * num_rows, type=pa.list_(pa.string())),
         }
     )
     try:

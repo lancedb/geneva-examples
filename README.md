@@ -269,6 +269,32 @@ dataset, plus `seed-video-clips` for load-testing the frame stages without a ful
 chunk run. Run any CLI with `--help` for its options (e.g. `--chunk-seconds`,
 `--model-name`/`--pretrained`/`--dim` on `frame-embed`).
 
+### Error tracking
+
+Both chunkers record failures on the clip rows themselves instead of silently
+dropping them: the clips tables carry a nullable `errors` column
+(`list<string>`, null on clean rows). A video whose blob can't be read, decoded,
+or windowed still yields one row with the failure message(s) — blob-read retries
+record one message per attempt — and a single bad window yields its row with the
+failed value null. Messages lead with a stable class tag
+(`blob_read_failed[1/4]:`, `decode_failed:`, `skipped:max_video_s(...)`, ...) so
+failures group in SQL. Filter `errors IS NULL` for fully clean rows, or
+`clip_bytes IS NOT NULL` for playable clips (a clip whose start frame didn't
+decode carries `no_start_frame` but keeps its bytes; the frame stages already
+tolerate null frames).
+
+To see the column in action without breaking a real dataset:
+
+```bash
+uv run chunk-videos-faults --mode local   # self-contained fault-injection demo
+```
+
+It seeds a poisoned OpenVid-style source dataset (corrupt, truncated, empty, and
+missing blobs, plus dangling and null pointers), chunks it through the unchanged
+`chunk-videos-openvid` pipeline, and prints every error plus an
+expected-vs-observed table of error classes per video — then browse
+`video_clips_faults` in the TUI's Tables pane.
+
 ## PDF workflow
 
 Extract text chunks from PDFs. `ingest-pdfs` loads every `*.pdf` under

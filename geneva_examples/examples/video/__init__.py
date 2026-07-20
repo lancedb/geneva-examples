@@ -15,6 +15,7 @@ from geneva_examples.core.spec import (
 )
 from geneva_examples.examples.video import (
     chunk,
+    chunk_faults,
     chunk_openvid,
     frame_caption,
     frame_embed,
@@ -103,6 +104,30 @@ CHUNK_OPENVID = Step(
     ),
 )
 
+CHUNK_FAULTS = Step(
+    key="chunk-videos-faults",
+    title="Chunk faulty videos (errors demo)",
+    description=(
+        "Fault-injection demo for the clips `errors` column: seed a poisoned "
+        "OpenVid-style dataset (corrupt/truncated/empty/missing blobs, dangling "
+        "and null pointers), chunk it through the unchanged blob pipeline, and "
+        "report expected vs observed error classes per video. Local mode."
+    ),
+    run=chunk_faults.run,
+    params=params_from_signature(
+        chunk_faults.run,
+        help=COMMON_HELP
+        | {
+            "data_dir": "Directory for the poisoned source Lance dataset.",
+            "videos_table": "Pointer table the demo creates (dropped first).",
+            "clips_table": "Clips view the demo materializes (dropped first).",
+            "max_video_s": "Length ceiling; the 6s corpus row demos `skipped:`.",
+            "read_retries": "Blob read attempts (dangling row shows retry history).",
+            "read_retry_sleep_s": "Base sleep (s) for blob-read backoff.",
+        },
+    ),
+)
+
 FRAME_EMBED = Step(
     key="frame-embed",
     title="OpenCLIP embeddings on frames",
@@ -183,6 +208,7 @@ EXAMPLE = Example(
         INGEST_OPENVID,
         CHUNK,
         CHUNK_OPENVID,
+        CHUNK_FAULTS,
         FRAME_EMBED,
         FRAME_CAPTION,
         FRAME_OPENPOSE,
