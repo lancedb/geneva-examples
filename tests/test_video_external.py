@@ -2,35 +2,28 @@
 
 The ``run()`` bodies of ``ingest-videos-external`` / ``chunk-videos-external``
 are covered by the CLI smoke tests; here we unit-test their pure helpers
-(endpoint peeling, ``VIDEO_S3_*`` credential resolution) and pin the spec
-surface the two new steps and the ``frame-embed --reset`` flag expose.
+(endpoint peeling, video credential resolution from flags + ``config.yaml``
+``s3_*`` settings) and pin the spec surface the two new steps and the
+``frame-embed --reset`` flag expose.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from geneva_examples.core.config import Config
 from geneva_examples.examples import video
 from geneva_examples.examples.video.ingest_external_refs import (
     _endpoint_and_scheme,
     _resolve_video_creds,
 )
 
-_ENV_KEYS = (
-    "VIDEO_S3_BUCKET",
-    "VIDEO_S3_ENDPOINT",
-    "VIDEO_S3_ACCESS_KEY",
-    "VIDEO_S3_SECRET_KEY",
-    "VIDEO_S3_REGION",
+_S3_CFG = dict(
+    s3_access_key="cfg-ak",
+    s3_secret_key="cfg-sk",  # noqa: S106 (fake test cred)
+    s3_endpoint="http://cfg-minio.test:9000",
+    s3_region="eu-central-1",
 )
-
-
-@pytest.fixture
-def scrubbed_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    """Remove any ambient VIDEO_S3_* vars so fallback behavior is deterministic."""
-    for key in _ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
-    return monkeypatch
 
 
 @pytest.mark.parametrize(
@@ -48,46 +41,100 @@ def test_endpoint_and_scheme_peels_url(endpoint, expected):
     assert _endpoint_and_scheme(endpoint) == expected
 
 
-def test_resolve_video_creds_prefers_explicit_args(scrubbed_env):
-    scrubbed_env.setenv("VIDEO_S3_BUCKET", "env-bucket")
-    scrubbed_env.setenv("VIDEO_S3_REGION", "env-region")
+def test_endpoint_and_scheme_honors_default_for_bare_host():
+    # A bare host takes the caller's default (http when aws_allow_http is set);
+    # an explicit URL scheme still wins over it.
+    assert _endpoint_and_scheme("minio.test:9000", default_scheme="http") == (
+        "minio.test:9000",
+        "http",
+    )
+    assert _endpoint_and_scheme("https://minio.test:9000", default_scheme="http") == (
+        "minio.test:9000",
+        "https",
+    )
+
+
+def test_resolve_video_creds_prefers_explicit_flags():
     resolved = _resolve_video_creds(
-        "flag-bucket", "minio.test:9000", "ak", "sk", "flag-region"
+        Config(**_S3_CFG),
+        bucket="flag-bucket",
+        endpoint="minio.test:9000",
+        access_key="ak",
+        secret_key="sk",  # noqa: S106 (fake test cred)
+        region="flag-region",
     )
     assert resolved == ("flag-bucket", "minio.test:9000", "ak", "sk", "flag-region")
 
 
-def test_resolve_video_creds_falls_back_to_env(scrubbed_env):
-    scrubbed_env.setenv("VIDEO_S3_BUCKET", "env-bucket")
-    scrubbed_env.setenv("VIDEO_S3_ENDPOINT", "https://minio.test:9000")
-    scrubbed_env.setenv("VIDEO_S3_ACCESS_KEY", "env-ak")
-    scrubbed_env.setenv("VIDEO_S3_SECRET_KEY", "env-sk")
-    scrubbed_env.setenv("VIDEO_S3_REGION", "eu-west-1")
-    resolved = _resolve_video_creds("", "", "", "", "")
+def test_resolve_video_creds_falls_back_to_config_storage():
+    # With no flags, the same s3_* block that backs the LanceDB connection is
+    # used — the corpus usually lives in the same object store.
+    resolved = _resolve_video_creds(
+        Config(**_S3_CFG),
+        bucket="vids",
+        endpoint="",
+        access_key="",
+        secret_key="",
+        region="",
+    )
     assert resolved == (
-        "env-bucket",
-        "https://minio.test:9000",
-        "env-ak",
-        "env-sk",
-        "eu-west-1",
+        "vids",
+        "http://cfg-minio.test:9000",
+        "cfg-ak",
+        "cfg-sk",
+        "eu-central-1",
     )
 
 
-def test_resolve_video_creds_defaults_region(scrubbed_env):
-    _ = scrubbed_env
-    resolved = _resolve_video_creds("b", "e", "ak", "sk", "")
+def test_resolve_video_creds_defaults_region():
+    cfg = Config(**{**_S3_CFG, "s3_region": None})
+    resolved = _resolve_video_creds(
+        cfg, bucket="vids", endpoint="", access_key="", secret_key="", region=""
+    )
     assert resolved[-1] == "us-east-1"
 
 
-def test_resolve_video_creds_reports_every_missing_field(scrubbed_env):
-    _ = scrubbed_env
+def test_resolve_video_creds_ignores_ambient_env(monkeypatch: pytest.MonkeyPatch):
+    # VIDEO_S3_* is the worker-env transport the chunk CLI *writes*, not a
+    # driver-side input: ambient values must not satisfy the resolution.
+    for key in ("BUCKET", "ENDPOINT", "ACCESS_KEY", "SECRET_KEY", "REGION"):
+        monkeypatch.setenv(f"VIDEO_S3_{key}", "ambient")
+    with pytest.raises(RuntimeError, match="missing video-bucket credentials"):
+        _resolve_video_creds(
+            Config(),
+            bucket="vids",
+            endpoint="",
+            access_key="",
+            secret_key="",
+            region="",
+        )
+
+
+def test_resolve_video_creds_reports_every_missing_field():
     with pytest.raises(RuntimeError) as excinfo:
-        _resolve_video_creds("b", "", "", "", "")
+        _resolve_video_creds(
+            Config(), bucket="b", endpoint="", access_key="", secret_key="", region=""
+        )
     message = str(excinfo.value)
     assert "missing video-bucket credentials" in message
+    assert "config.yaml" in message
     assert "video_bucket" not in message  # provided, so not reported
     for name in ("video_endpoint", "video_access_key", "video_secret_key"):
         assert name in message
+
+
+def test_resolve_video_creds_bucket_optional_for_chunk():
+    # The chunk CLI's video_uri rows already carry the bucket.
+    resolved = _resolve_video_creds(
+        Config(**_S3_CFG),
+        endpoint="",
+        access_key="",
+        secret_key="",
+        region="",
+        require_bucket=False,
+    )
+    assert resolved[0] == ""
+    assert resolved[2] == "cfg-ak"
 
 
 def test_external_steps_registered_with_expected_params():
@@ -97,6 +144,9 @@ def test_external_steps_registered_with_expected_params():
     assert params["suffix"].default == ".mp4"
     assert params["limit"].default == 100
     assert params["sample"].type is str and params["sample"].default == ""
+    # Cred params default empty = "resolve from config.yaml s3_*".
+    assert params["video_endpoint"].default == ""
+    assert params["video_region"].default == ""
 
     chunk = video.EXAMPLE.step("chunk-videos-external")
     assert chunk.run is video.chunk_external_video.run
@@ -104,6 +154,7 @@ def test_external_steps_registered_with_expected_params():
     assert params["source_task_size"].default == 1  # fan out one video per task
     assert params["detach"].type is bool and params["detach"].default is False
     assert params["uri_column"].default == "video_uri"
+    assert params["video_region"].default == ""
 
 
 def test_frame_embed_reset_defaults_to_incremental():

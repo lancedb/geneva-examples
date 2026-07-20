@@ -143,7 +143,9 @@ def _bucket_dir(path: str):
     return types.SimpleNamespace(path=path, size=0, type=pafs.FileType.Directory)
 
 
-def _invoke_ingest_external(monkeypatch, infos, args):
+def _invoke_ingest_external(
+    monkeypatch, tmp_path, infos, args, *, cred_flags=True, config_text=None
+):
     from geneva_examples.examples.video import ingest_external_refs as mod
 
     conn = _RecordingConn(table=FakeTable(names=["video_id", "video_uri", "size_mb"]))
@@ -156,27 +158,28 @@ def _invoke_ingest_external(monkeypatch, infos, args):
         return fs
 
     monkeypatch.setattr("pyarrow.fs.S3FileSystem", _factory)
-    result = CliRunner().invoke(
-        cli.ingest_videos_external,
-        [
-            "--mode",
-            "local",
-            "--video-bucket",
-            "vids",
+    # Always pass --config so the developer's real ./config.yaml (whose s3_*
+    # block now feeds the video-cred fallback) can't leak into the test.
+    config = tmp_path / "config.yaml"
+    if config_text is not None:
+        config.write_text(config_text)
+    cli_args = ["--mode", "local", "--config", str(config), "--video-bucket", "vids"]
+    if cred_flags:
+        cli_args += [
             "--video-endpoint",
             "http://minio.test:9000",
             "--video-access-key",
             "ak",
             "--video-secret-key",
             "sk",
-            *args,
-        ],
-    )
+        ]
+    result = CliRunner().invoke(cli.ingest_videos_external, [*cli_args, *args])
     return result, conn, fs, constructed
 
 
 def test_ingest_videos_external_registers_reference_rows(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     infos = [
         _bucket_file("vids/big.mp4", 3_000_000),
@@ -186,7 +189,7 @@ def test_ingest_videos_external_registers_reference_rows(
         _bucket_dir("vids/subdir"),  # non-file entries ignored
     ]
     result, conn, fs, constructed = _invoke_ingest_external(
-        monkeypatch, infos, ["--limit", "2"]
+        monkeypatch, tmp_path, infos, ["--limit", "2"]
     )
 
     assert result.exit_code == 0, result.output
@@ -209,10 +212,11 @@ def test_ingest_videos_external_registers_reference_rows(
 
 def test_ingest_videos_external_lists_under_prefix(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     infos = [_bucket_file("vids/raw/v.mp4", 1_000_000)]
     result, _conn, fs, _ = _invoke_ingest_external(
-        monkeypatch, infos, ["--prefix", "raw"]
+        monkeypatch, tmp_path, infos, ["--prefix", "raw"]
     )
     assert result.exit_code == 0, result.output
     assert fs.selectors[0].base_dir == "vids/raw"
@@ -220,10 +224,11 @@ def test_ingest_videos_external_lists_under_prefix(
 
 def test_ingest_videos_external_stride_sample_spans_sizes(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     infos = [_bucket_file(f"vids/v{i}.mp4", i * 1_000_000) for i in range(1, 11)]
     result, conn, _fs, _ = _invoke_ingest_external(
-        monkeypatch, infos, ["--limit", "3", "--sample", "stride"]
+        monkeypatch, tmp_path, infos, ["--limit", "3", "--sample", "stride"]
     )
     assert result.exit_code == 0, result.output
     # Systematic sample over the size-sorted corpus: ranks 0, 3, 7 of 10 —
@@ -233,10 +238,11 @@ def test_ingest_videos_external_stride_sample_spans_sizes(
 
 def test_ingest_videos_external_rejects_unknown_sample(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     infos = [_bucket_file("vids/v.mp4", 1_000_000)]
     result, conn, _fs, _ = _invoke_ingest_external(
-        monkeypatch, infos, ["--sample", "bogus"]
+        monkeypatch, tmp_path, infos, ["--sample", "bogus"]
     )
     assert result.exit_code != 0
     assert "unknown --sample" in str(result.exception)
@@ -245,10 +251,41 @@ def test_ingest_videos_external_rejects_unknown_sample(
 
 def test_ingest_videos_external_errors_when_nothing_matches(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     result, conn, _fs, _ = _invoke_ingest_external(
-        monkeypatch, [_bucket_file("vids/readme.txt", 10)], []
+        monkeypatch, tmp_path, [_bucket_file("vids/readme.txt", 10)], []
     )
     assert result.exit_code != 0
     assert "no .mp4 objects" in str(result.exception)
     assert "videos" not in conn.created
+
+
+def test_ingest_videos_external_creds_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # No --video-* cred flags: the config.yaml s3_* storage block (the same one
+    # the LanceDB connection uses) supplies the video-bucket credentials.
+    infos = [_bucket_file("vids/v.mp4", 1_000_000)]
+    result, conn, _fs, constructed = _invoke_ingest_external(
+        monkeypatch,
+        tmp_path,
+        infos,
+        [],
+        cred_flags=False,
+        config_text=(
+            "mode: local\n"
+            "s3_access_key: cfg-ak\n"
+            "s3_secret_key: cfg-sk\n"
+            "s3_endpoint: http://cfg-minio.test:9000\n"
+            "s3_region: eu-central-1\n"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    assert "videos" in conn.created
+    assert constructed[0]["access_key"] == "cfg-ak"
+    assert constructed[0]["secret_key"] == "cfg-sk"  # noqa: S105 (fake test cred)
+    assert constructed[0]["endpoint_override"] == "cfg-minio.test:9000"
+    assert constructed[0]["scheme"] == "http"
+    assert constructed[0]["region"] == "eu-central-1"

@@ -6,13 +6,16 @@ Enumerates an S3-compatible bucket of raw video files and writes a
 :func:`chunk_uri_video_udtf` chunker later opens each URI directly on the worker.
 
 This is the right ingest when the corpus already lives as native files in a
-**separate bucket** from the LanceDB tables, possibly under a *different,
-bucket-scoped* credential: the LanceDB token writes this tiny pointer table, and
-only the *video* token (below / ``VIDEO_S3_*`` env) needs read access to the
+**separate bucket** from the LanceDB tables: the LanceDB token writes this tiny
+pointer table, and only the *video* credentials (below) need read access to the
 video bucket. Nothing heavy moves through the client — ingest is seconds.
 
 Video-bucket credentials come from the ``--video-*`` options, each falling back
-to a ``VIDEO_S3_*`` environment variable when unset.
+to the matching ``s3_*`` storage setting in ``config.yaml`` — the corpus usually
+shares the object store with the LanceDB tables (same endpoint and token, just a
+different bucket). Pass explicit flags when the videos sit under a *different,
+bucket-scoped* token. Only the bucket name has no config equivalent and is
+always passed via ``--video-bucket``.
 """
 
 from __future__ import annotations
@@ -27,41 +30,56 @@ from geneva_examples.core.utils.retry import retry_io
 logger = logging.getLogger(__name__)
 
 
-def _endpoint_and_scheme(endpoint: str) -> tuple[str, str]:
+def _endpoint_and_scheme(
+    endpoint: str, default_scheme: str = "https"
+) -> tuple[str, str]:
     """Split an endpoint into (host[:port], scheme) for pyarrow S3FileSystem.
 
-    ``endpoint_override`` wants a bare host; accept a full URL and peel the scheme.
+    ``endpoint_override`` wants a bare host; accept a full URL and peel the
+    scheme. A bare host gets ``default_scheme`` (callers pass ``http`` when the
+    config says ``aws_allow_http``).
     """
     if endpoint.startswith("https://"):
         return endpoint[len("https://") :].rstrip("/"), "https"
     if endpoint.startswith("http://"):
         return endpoint[len("http://") :].rstrip("/"), "http"
-    return endpoint.rstrip("/"), "https"
+    return endpoint.rstrip("/"), default_scheme
 
 
 def _resolve_video_creds(
-    bucket: str, endpoint: str, access_key: str, secret_key: str, region: str
+    cfg: Config,
+    *,
+    bucket: str = "",
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    region: str,
+    require_bucket: bool = True,
 ) -> tuple[str, str, str, str, str]:
-    """Fill blanks from ``VIDEO_S3_*`` env; error if any required field is missing."""
-    bucket = bucket or os.environ.get("VIDEO_S3_BUCKET", "")
-    endpoint = endpoint or os.environ.get("VIDEO_S3_ENDPOINT", "")
-    access_key = access_key or os.environ.get("VIDEO_S3_ACCESS_KEY", "")
-    secret_key = secret_key or os.environ.get("VIDEO_S3_SECRET_KEY", "")
-    region = region or os.environ.get("VIDEO_S3_REGION", "us-east-1")
-    missing = [
-        name
-        for name, val in (
-            ("video_bucket", bucket),
-            ("video_endpoint", endpoint),
-            ("video_access_key", access_key),
-            ("video_secret_key", secret_key),
-        )
-        if not val
+    """Fill blanks from the config's ``s3_*`` storage settings; error on gaps.
+
+    Explicit ``--video-*`` flags win so a corpus under a different, bucket-scoped
+    token still works; with no flags, the same ``config.yaml`` ``s3_*`` block
+    that backs the LanceDB connection is used. The chunk CLI passes
+    ``require_bucket=False`` — its ``video_uri`` rows already carry the bucket.
+    """
+    endpoint = endpoint or cfg.s3_endpoint or ""
+    access_key = access_key or cfg.s3_access_key or ""
+    secret_key = secret_key or cfg.s3_secret_key or ""
+    region = region or cfg.s3_region or "us-east-1"
+    required = [
+        ("video_bucket", bucket),
+        ("video_endpoint", endpoint),
+        ("video_access_key", access_key),
+        ("video_secret_key", secret_key),
     ]
+    if not require_bucket:
+        required = required[1:]
+    missing = [name for name, val in required if not val]
     if missing:
         raise RuntimeError(
-            "missing video-bucket credentials (pass --video-* or set VIDEO_S3_*): "
-            + ", ".join(missing)
+            "missing video-bucket credentials (pass --video-* or set s3_* in "
+            "config.yaml): " + ", ".join(missing)
         )
     return bucket, endpoint, access_key, secret_key, region
 
@@ -74,7 +92,7 @@ def run(
     video_endpoint: str = "",
     video_access_key: str = "",
     video_secret_key: str = "",
-    video_region: str = "us-east-1",
+    video_region: str = "",
     prefix: str = "",
     suffix: str = ".mp4",
     limit: int = 100,
@@ -92,9 +110,16 @@ def run(
     import pyarrow.fs as pafs
 
     bucket, endpoint, access_key, secret_key, region = _resolve_video_creds(
-        video_bucket, video_endpoint, video_access_key, video_secret_key, video_region
+        cfg,
+        bucket=video_bucket,
+        endpoint=video_endpoint,
+        access_key=video_access_key,
+        secret_key=video_secret_key,
+        region=video_region,
     )
-    host, scheme = _endpoint_and_scheme(endpoint)
+    host, scheme = _endpoint_and_scheme(
+        endpoint, default_scheme="http" if cfg.aws_allow_http else "https"
+    )
 
     logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info("db_uri %s table %s bucket %s", cfg.db_uri, table_name, bucket)

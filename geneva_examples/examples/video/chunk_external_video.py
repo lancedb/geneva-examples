@@ -9,10 +9,11 @@ opens each URI directly on the worker via ``pyarrow.fs.S3FileSystem`` and emits
 The UDTF view *is* the output table: geneva only runs a chunker inside a
 materialized view, so we create it under ``--clips-table`` and refresh in place.
 
-Video-bucket credentials (``--video-*`` / ``VIDEO_S3_*``) are injected into the
-worker environment via the manifest's ``env_vars`` — the *only* token that needs
-read access to the video bucket. The LanceDB connection uses its own (separate)
-credentials for the source/clip tables.
+Video-bucket credentials (``--video-*`` flags, falling back to the ``s3_*``
+storage settings in ``config.yaml``) are injected into the worker environment as
+``VIDEO_S3_*`` via the manifest's ``env_vars`` — the *only* token that needs
+read access to the video bucket. Pass explicit flags when the corpus sits under
+a different, bucket-scoped token than the LanceDB tables.
 
 ``source_task_size=1`` (the default here) puts one video per expansion task so
 the work fans out across the fleet — essential for parallel video decode.
@@ -52,7 +53,7 @@ def run(
     video_endpoint: str = "",
     video_access_key: str = "",
     video_secret_key: str = "",
-    video_region: str = "us-east-1",
+    video_region: str = "",
     chunk_seconds: float = 10.0,
     concurrency: int = 8,
     checkpoint_size: int = 32,
@@ -77,9 +78,16 @@ def run(
 
     # Video-bucket creds (bucket itself isn't needed here — the URIs carry it).
     _, endpoint, access_key, secret_key, region = _resolve_video_creds(
-        "n/a", video_endpoint, video_access_key, video_secret_key, video_region
+        cfg,
+        endpoint=video_endpoint,
+        access_key=video_access_key,
+        secret_key=video_secret_key,
+        region=video_region,
+        require_bucket=False,
     )
-    host, scheme = _endpoint_and_scheme(endpoint)
+    host, scheme = _endpoint_and_scheme(
+        endpoint, default_scheme="http" if cfg.aws_allow_http else "https"
+    )
 
     num_cpus, num_gpus, memory_bytes = resolve_resources(
         cfg, num_cpus=num_cpus, num_gpus=num_gpus, memory_gib=memory_gib
@@ -123,9 +131,11 @@ def run(
         "VIDEO_S3_REGION": region,
     }
     if cfg.is_local:
-        # Local Ray workers share the driver env; no remote manifest to attach to.
-        for key, value in worker_env.items():
-            os.environ.setdefault(key, value)
+        # Local Ray workers share the driver env; no remote manifest to attach
+        # to. Overwrite rather than setdefault: the resolved flag/config values
+        # must win over any stale ambient VIDEO_S3_* so the UDF sees exactly
+        # what this run was asked to use.
+        os.environ.update(worker_env)
         manifest = None
     else:
         from geneva.manifest import GenevaManifest
