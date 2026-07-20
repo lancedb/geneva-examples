@@ -75,10 +75,10 @@ INGEST_EXTERNAL = Step(
         help=COMMON_HELP
         | {
             "video_bucket": "Video bucket name (the corpus bucket, not LanceDB's).",
-            "video_endpoint": "S3 endpoint URL (default: config.yaml s3_endpoint).",
-            "video_access_key": "Video-bucket access key (default: config.yaml s3_access_key).",
-            "video_secret_key": "Video-bucket secret key (default: config.yaml s3_secret_key).",
-            "video_region": "SigV4 region (default: config.yaml s3_region, else us-east-1).",
+            "video_endpoint": "S3 endpoint URL (default: config.yaml assets_s3_endpoint).",
+            "video_access_key": "Video-bucket access key (default: config.yaml assets_s3_access_key).",
+            "video_secret_key": "Video-bucket secret key (default: config.yaml assets_s3_secret_key).",
+            "video_region": "SigV4 region (default: config.yaml assets_s3_region, else us-east-1).",
             "prefix": "Only list keys under this prefix.",
             "suffix": "Only keep keys with this suffix.",
             "limit": "Max videos to register (0 = all).",
@@ -150,10 +150,10 @@ CHUNK_EXTERNAL = Step(
         help=COMMON_HELP
         | {
             "uri_column": "URI pointer column in the videos table.",
-            "video_endpoint": "S3 endpoint URL (default: config.yaml s3_endpoint).",
-            "video_access_key": "Video-bucket access key (default: config.yaml s3_access_key).",
-            "video_secret_key": "Video-bucket secret key (default: config.yaml s3_secret_key).",
-            "video_region": "SigV4 region (default: config.yaml s3_region, else us-east-1).",
+            "video_endpoint": "S3 endpoint URL (default: config.yaml assets_s3_endpoint).",
+            "video_access_key": "Video-bucket access key (default: config.yaml assets_s3_access_key).",
+            "video_secret_key": "Video-bucket secret key (default: config.yaml assets_s3_secret_key).",
+            "video_region": "SigV4 region (default: config.yaml assets_s3_region, else us-east-1).",
             "source_task_size": "Source rows per chunker task (1 = fan out per video).",
             "max_clips": "Cap clips per video (default: all).",
             "max_video_s": "Skip videos longer than this many seconds.",

@@ -160,7 +160,7 @@ def _install_fake_video_s3(
     *,
     sizes: dict[str, int] | None = None,
 ) -> tuple[list[dict], list[str]]:
-    """Back the URI chunker with an in-memory object store + VIDEO_S3_* creds.
+    """Back the URI chunker with an in-memory object store + ASSETS_S3_* creds.
 
     The chunker closure constructs ``pyarrow.fs.S3FileSystem`` at call time from
     worker env vars, so patching the class and setting the env is the whole
@@ -184,11 +184,11 @@ def _install_fake_video_s3(
 
     monkeypatch.setattr("pyarrow.fs.S3FileSystem", _factory)
     for key, value in {
-        "VIDEO_S3_ACCESS_KEY": "ak",
-        "VIDEO_S3_SECRET_KEY": "sk",
-        "VIDEO_S3_ENDPOINT": "minio.test:9000",
-        "VIDEO_S3_SCHEME": "http",
-        "VIDEO_S3_REGION": "us-east-1",
+        "ASSETS_S3_ACCESS_KEY": "ak",
+        "ASSETS_S3_SECRET_KEY": "sk",
+        "ASSETS_S3_ENDPOINT": "minio.test:9000",
+        "ASSETS_S3_SCHEME": "http",
+        "ASSETS_S3_REGION": "us-east-1",
     }.items():
         monkeypatch.setenv(key, value)
     return constructed, opened
@@ -230,7 +230,7 @@ def test_chunk_uri_video_udtf_clips_are_decodable(monkeypatch, mp4_bytes):
 
 def test_chunk_uri_video_udtf_skips_rows_without_credentials(monkeypatch, mp4_bytes):
     _install_fake_video_s3(monkeypatch, {"vids/v0.mp4": mp4_bytes})
-    monkeypatch.delenv("VIDEO_S3_ACCESS_KEY")
+    monkeypatch.delenv("ASSETS_S3_ACCESS_KEY")
     udtf = chunkers_uri.chunk_uri_video_udtf(chunk_seconds=1.0, manifest=None)
     # Missing worker creds are a config error surfaced as warn+skip, not a raise.
     assert list(udtf.func("s3://vids/v0.mp4")) == []

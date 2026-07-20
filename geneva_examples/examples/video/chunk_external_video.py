@@ -9,11 +9,12 @@ opens each URI directly on the worker via ``pyarrow.fs.S3FileSystem`` and emits
 The UDTF view *is* the output table: geneva only runs a chunker inside a
 materialized view, so we create it under ``--clips-table`` and refresh in place.
 
-Video-bucket credentials (``--video-*`` flags, falling back to the ``s3_*``
-storage settings in ``config.yaml``) are injected into the worker environment as
-``VIDEO_S3_*`` via the manifest's ``env_vars`` — the *only* token that needs
-read access to the video bucket. Pass explicit flags when the corpus sits under
-a different, bucket-scoped token than the LanceDB tables.
+Video-bucket credentials (``--video-*`` flags, falling back to the
+``assets_s3_*`` block in ``config.yaml`` — a token deliberately separate from
+the storage ``s3_*`` creds) are injected into the worker environment as
+``ASSETS_S3_*`` via the manifest's ``env_vars``. Only this assets token needs
+read access to the video bucket; the LanceDB connection keeps its own
+credentials for the source/clip tables.
 
 ``source_task_size=1`` (the default here) puts one video per expansion task so
 the work fans out across the fleet — essential for parallel video decode.
@@ -85,9 +86,7 @@ def run(
         region=video_region,
         require_bucket=False,
     )
-    host, scheme = _endpoint_and_scheme(
-        endpoint, default_scheme="http" if cfg.aws_allow_http else "https"
-    )
+    host, scheme = _endpoint_and_scheme(endpoint)
 
     num_cpus, num_gpus, memory_bytes = resolve_resources(
         cfg, num_cpus=num_cpus, num_gpus=num_gpus, memory_gib=memory_gib
@@ -124,16 +123,16 @@ def run(
     # split into a bare host + scheme so the UDF's S3FileSystem can target a
     # non-AWS S3 service on either http or https (endpoint_override wants a host).
     worker_env = {
-        "VIDEO_S3_ACCESS_KEY": access_key,
-        "VIDEO_S3_SECRET_KEY": secret_key,
-        "VIDEO_S3_ENDPOINT": host,
-        "VIDEO_S3_SCHEME": scheme,
-        "VIDEO_S3_REGION": region,
+        "ASSETS_S3_ACCESS_KEY": access_key,
+        "ASSETS_S3_SECRET_KEY": secret_key,
+        "ASSETS_S3_ENDPOINT": host,
+        "ASSETS_S3_SCHEME": scheme,
+        "ASSETS_S3_REGION": region,
     }
     if cfg.is_local:
         # Local Ray workers share the driver env; no remote manifest to attach
         # to. Overwrite rather than setdefault: the resolved flag/config values
-        # must win over any stale ambient VIDEO_S3_* so the UDF sees exactly
+        # must win over any stale ambient ASSETS_S3_* so the UDF sees exactly
         # what this run was asked to use.
         os.environ.update(worker_env)
         manifest = None

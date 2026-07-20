@@ -158,8 +158,8 @@ def _invoke_ingest_external(
         return fs
 
     monkeypatch.setattr("pyarrow.fs.S3FileSystem", _factory)
-    # Always pass --config so the developer's real ./config.yaml (whose s3_*
-    # block now feeds the video-cred fallback) can't leak into the test.
+    # Always pass --config so the developer's real ./config.yaml (whose
+    # assets_s3_* block feeds the video-cred fallback) can't leak into the test.
     config = tmp_path / "config.yaml"
     if config_text is not None:
         config.write_text(config_text)
@@ -265,8 +265,9 @@ def test_ingest_videos_external_creds_from_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    # No --video-* cred flags: the config.yaml s3_* storage block (the same one
-    # the LanceDB connection uses) supplies the video-bucket credentials.
+    # No --video-* cred flags: the config.yaml assets_s3_* block supplies the
+    # video-bucket credentials. A storage s3_* block is present but must NOT
+    # be consulted — the two credential sets are separate.
     infos = [_bucket_file("vids/v.mp4", 1_000_000)]
     result, conn, _fs, constructed = _invoke_ingest_external(
         monkeypatch,
@@ -276,10 +277,14 @@ def test_ingest_videos_external_creds_from_config(
         cred_flags=False,
         config_text=(
             "mode: local\n"
-            "s3_access_key: cfg-ak\n"
-            "s3_secret_key: cfg-sk\n"
-            "s3_endpoint: http://cfg-minio.test:9000\n"
-            "s3_region: eu-central-1\n"
+            "s3_access_key: storage-ak\n"
+            "s3_secret_key: storage-sk\n"
+            "s3_endpoint: http://storage-minio.test:9000\n"
+            "s3_region: us-west-2\n"
+            "assets_s3_access_key: cfg-ak\n"
+            "assets_s3_secret_key: cfg-sk\n"
+            "assets_s3_endpoint: http://cfg-minio.test:9000\n"
+            "assets_s3_region: eu-central-1\n"
         ),
     )
     assert result.exit_code == 0, result.output

@@ -11,11 +11,11 @@ pointer table, and only the *video* credentials (below) need read access to the
 video bucket. Nothing heavy moves through the client — ingest is seconds.
 
 Video-bucket credentials come from the ``--video-*`` options, each falling back
-to the matching ``s3_*`` storage setting in ``config.yaml`` — the corpus usually
-shares the object store with the LanceDB tables (same endpoint and token, just a
-different bucket). Pass explicit flags when the videos sit under a *different,
-bucket-scoped* token. Only the bucket name has no config equivalent and is
-always passed via ``--video-bucket``.
+to the matching ``assets_s3_*`` setting in ``config.yaml``. That block is
+deliberately **separate** from the storage ``s3_*`` creds (the LanceDB bucket's
+token) — the assets bucket typically uses its own bucket-scoped token, and
+neither set falls back to the other. Only the bucket name has no config
+equivalent and is always passed via ``--video-bucket``.
 """
 
 from __future__ import annotations
@@ -30,20 +30,18 @@ from geneva_examples.core.utils.retry import retry_io
 logger = logging.getLogger(__name__)
 
 
-def _endpoint_and_scheme(
-    endpoint: str, default_scheme: str = "https"
-) -> tuple[str, str]:
+def _endpoint_and_scheme(endpoint: str) -> tuple[str, str]:
     """Split an endpoint into (host[:port], scheme) for pyarrow S3FileSystem.
 
     ``endpoint_override`` wants a bare host; accept a full URL and peel the
-    scheme. A bare host gets ``default_scheme`` (callers pass ``http`` when the
-    config says ``aws_allow_http``).
+    scheme. A bare host defaults to https — use a full ``http://`` URL for
+    plain-HTTP endpoints.
     """
     if endpoint.startswith("https://"):
         return endpoint[len("https://") :].rstrip("/"), "https"
     if endpoint.startswith("http://"):
         return endpoint[len("http://") :].rstrip("/"), "http"
-    return endpoint.rstrip("/"), default_scheme
+    return endpoint.rstrip("/"), "https"
 
 
 def _resolve_video_creds(
@@ -56,17 +54,18 @@ def _resolve_video_creds(
     region: str,
     require_bucket: bool = True,
 ) -> tuple[str, str, str, str, str]:
-    """Fill blanks from the config's ``s3_*`` storage settings; error on gaps.
+    """Fill blanks from the config's ``assets_s3_*`` settings; error on gaps.
 
-    Explicit ``--video-*`` flags win so a corpus under a different, bucket-scoped
-    token still works; with no flags, the same ``config.yaml`` ``s3_*`` block
-    that backs the LanceDB connection is used. The chunk CLI passes
-    ``require_bucket=False`` — its ``video_uri`` rows already carry the bucket.
+    Explicit ``--video-*`` flags win; otherwise the ``assets_s3_*`` block in
+    ``config.yaml`` supplies the assets-bucket token. The storage ``s3_*`` creds
+    (the LanceDB bucket) are deliberately NOT consulted — the two buckets use
+    separate scoped tokens. The chunk CLI passes ``require_bucket=False`` — its
+    ``video_uri`` rows already carry the bucket.
     """
-    endpoint = endpoint or cfg.s3_endpoint or ""
-    access_key = access_key or cfg.s3_access_key or ""
-    secret_key = secret_key or cfg.s3_secret_key or ""
-    region = region or cfg.s3_region or "us-east-1"
+    endpoint = endpoint or cfg.assets_s3_endpoint or ""
+    access_key = access_key or cfg.assets_s3_access_key or ""
+    secret_key = secret_key or cfg.assets_s3_secret_key or ""
+    region = region or cfg.assets_s3_region or "us-east-1"
     required = [
         ("video_bucket", bucket),
         ("video_endpoint", endpoint),
@@ -78,8 +77,8 @@ def _resolve_video_creds(
     missing = [name for name, val in required if not val]
     if missing:
         raise RuntimeError(
-            "missing video-bucket credentials (pass --video-* or set s3_* in "
-            "config.yaml): " + ", ".join(missing)
+            "missing video-bucket credentials (pass --video-* or set "
+            "assets_s3_* in config.yaml): " + ", ".join(missing)
         )
     return bucket, endpoint, access_key, secret_key, region
 
@@ -130,9 +129,7 @@ def run(
         secret_key=video_secret_key,
         region=video_region,
     )
-    host, scheme = _endpoint_and_scheme(
-        endpoint, default_scheme="http" if cfg.aws_allow_http else "https"
-    )
+    host, scheme = _endpoint_and_scheme(endpoint)
 
     logger.info("geneva_version %s mode %s", geneva.__version__, cfg.mode)
     logger.info("db_uri %s table %s bucket %s", cfg.db_uri, table_name, bucket)

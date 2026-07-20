@@ -2,8 +2,8 @@
 
 The ``run()`` bodies of ``ingest-videos-external`` / ``chunk-videos-external``
 are covered by the CLI smoke tests; here we unit-test their pure helpers
-(endpoint peeling, video credential resolution from flags + ``config.yaml``
-``s3_*`` settings) and pin the spec surface the two new steps and the
+(endpoint peeling, video credential resolution from flags + the ``config.yaml``
+``assets_s3_*`` block) and pin the spec surface the two new steps and the
 ``frame-embed --reset`` flag expose.
 """
 
@@ -19,11 +19,11 @@ from geneva_examples.examples.video.ingest_external_refs import (
     _video_id,
 )
 
-_S3_CFG = dict(
-    s3_access_key="cfg-ak",
-    s3_secret_key="cfg-sk",  # noqa: S106 (fake test cred)
-    s3_endpoint="http://cfg-minio.test:9000",
-    s3_region="eu-central-1",
+_ASSETS_CFG = dict(
+    assets_s3_access_key="cfg-ak",
+    assets_s3_secret_key="cfg-sk",  # noqa: S106 (fake test cred)
+    assets_s3_endpoint="http://cfg-minio.test:9000",
+    assets_s3_region="eu-central-1",
 )
 
 
@@ -42,22 +42,9 @@ def test_endpoint_and_scheme_peels_url(endpoint, expected):
     assert _endpoint_and_scheme(endpoint) == expected
 
 
-def test_endpoint_and_scheme_honors_default_for_bare_host():
-    # A bare host takes the caller's default (http when aws_allow_http is set);
-    # an explicit URL scheme still wins over it.
-    assert _endpoint_and_scheme("minio.test:9000", default_scheme="http") == (
-        "minio.test:9000",
-        "http",
-    )
-    assert _endpoint_and_scheme("https://minio.test:9000", default_scheme="http") == (
-        "minio.test:9000",
-        "https",
-    )
-
-
 def test_resolve_video_creds_prefers_explicit_flags():
     resolved = _resolve_video_creds(
-        Config(**_S3_CFG),
+        Config(**_ASSETS_CFG),
         bucket="flag-bucket",
         endpoint="minio.test:9000",
         access_key="ak",
@@ -67,11 +54,10 @@ def test_resolve_video_creds_prefers_explicit_flags():
     assert resolved == ("flag-bucket", "minio.test:9000", "ak", "sk", "flag-region")
 
 
-def test_resolve_video_creds_falls_back_to_config_storage():
-    # With no flags, the same s3_* block that backs the LanceDB connection is
-    # used — the corpus usually lives in the same object store.
+def test_resolve_video_creds_falls_back_to_assets_config():
+    # With no flags, the assets_s3_* block supplies the assets-bucket token.
     resolved = _resolve_video_creds(
-        Config(**_S3_CFG),
+        Config(**_ASSETS_CFG),
         bucket="vids",
         endpoint="",
         access_key="",
@@ -87,8 +73,24 @@ def test_resolve_video_creds_falls_back_to_config_storage():
     )
 
 
+def test_resolve_video_creds_never_uses_storage_creds():
+    # The storage s3_* block (the LanceDB bucket's token) and the assets block
+    # are separate credential sets — a fully-configured storage block must NOT
+    # satisfy the video resolution.
+    cfg = Config(
+        s3_access_key="storage-ak",
+        s3_secret_key="storage-sk",  # noqa: S106 (fake test cred)
+        s3_endpoint="http://storage-minio.test:9000",
+        s3_region="us-west-2",
+    )
+    with pytest.raises(RuntimeError, match="missing video-bucket credentials"):
+        _resolve_video_creds(
+            cfg, bucket="vids", endpoint="", access_key="", secret_key="", region=""
+        )
+
+
 def test_resolve_video_creds_defaults_region():
-    cfg = Config(**{**_S3_CFG, "s3_region": None})
+    cfg = Config(**{**_ASSETS_CFG, "assets_s3_region": None})
     resolved = _resolve_video_creds(
         cfg, bucket="vids", endpoint="", access_key="", secret_key="", region=""
     )
@@ -96,10 +98,10 @@ def test_resolve_video_creds_defaults_region():
 
 
 def test_resolve_video_creds_ignores_ambient_env(monkeypatch: pytest.MonkeyPatch):
-    # VIDEO_S3_* is the worker-env transport the chunk CLI *writes*, not a
+    # ASSETS_S3_* is the worker-env transport the chunk CLI *writes*, not a
     # driver-side input: ambient values must not satisfy the resolution.
     for key in ("BUCKET", "ENDPOINT", "ACCESS_KEY", "SECRET_KEY", "REGION"):
-        monkeypatch.setenv(f"VIDEO_S3_{key}", "ambient")
+        monkeypatch.setenv(f"ASSETS_S3_{key}", "ambient")
     with pytest.raises(RuntimeError, match="missing video-bucket credentials"):
         _resolve_video_creds(
             Config(),
@@ -118,7 +120,7 @@ def test_resolve_video_creds_reports_every_missing_field():
         )
     message = str(excinfo.value)
     assert "missing video-bucket credentials" in message
-    assert "config.yaml" in message
+    assert "assets_s3_* in config.yaml" in message
     assert "video_bucket" not in message  # provided, so not reported
     for name in ("video_endpoint", "video_access_key", "video_secret_key"):
         assert name in message
@@ -127,7 +129,7 @@ def test_resolve_video_creds_reports_every_missing_field():
 def test_resolve_video_creds_bucket_optional_for_chunk():
     # The chunk CLI's video_uri rows already carry the bucket.
     resolved = _resolve_video_creds(
-        Config(**_S3_CFG),
+        Config(**_ASSETS_CFG),
         endpoint="",
         access_key="",
         secret_key="",
