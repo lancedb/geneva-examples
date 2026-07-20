@@ -84,6 +84,19 @@ def _resolve_video_creds(
     return bucket, endpoint, access_key, secret_key, region
 
 
+def _video_id(path: str, root: str, suffix: str) -> str:
+    """Object key relative to the listing root, suffix stripped case-insensitively.
+
+    Relative-to-root rather than the basename so ids stay unique when the corpus
+    nests videos under prefixes; for a flat listing it *is* the basename. The
+    strip mirrors the case-insensitive suffix filter (``VID.MP4`` -> ``VID``).
+    """
+    rel = path[len(root) :].lstrip("/")
+    if suffix and rel.lower().endswith(suffix.lower()):
+        rel = rel[: -len(suffix)]
+    return rel
+
+
 def run(
     cfg: Config,
     *,
@@ -159,6 +172,8 @@ def run(
             infos.sort(key=lambda i: i.size)
         picks = infos[: max(0, limit)] if limit else infos
         mode = "smallest-first" if smallest_first else "listing order"
+    if not picks:
+        raise RuntimeError(f"empty selection (limit={limit}); nothing to register")
     mean_mb = sum(i.size for i in picks) / len(picks) / 1e6
     logger.info(
         "selecting %d (%s); size min/mean/max %.1f/%.1f/%.1f MB",
@@ -171,7 +186,7 @@ def run(
 
     rows = pa.table(
         {
-            "video_id": [p.path.rsplit("/", 1)[-1].removesuffix(suffix) for p in picks],
+            "video_id": [_video_id(p.path, root, suffix) for p in picks],
             "video_uri": [f"s3://{p.path}" for p in picks],
             "size_mb": [round(p.size / 1e6, 3) for p in picks],
         },

@@ -124,6 +124,62 @@ def test_chunk_external_cli_reads_creds_from_config(
     assert os.environ["VIDEO_S3_REGION"] == "eu-central-1"
 
 
+def test_chunk_external_cli_threads_uri_column(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # geneva validates the chunker's input_columns against the view's source
+    # projection server-side, so --uri-column must reach both or the refresh
+    # fails. Record what the CLI hands to select() and create_udtf_view().
+    from geneva_examples.examples.video import chunk_external_video as mod
+
+    class _SelectRecordingTable(FakeTable):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.selected: list[list[str]] = []
+
+        def select(self, columns=None, *args, **kwargs):
+            if columns is not None:
+                self.selected.append(list(columns))
+            return super().select(columns, *args, **kwargs)
+
+    class _ViewRecordingConn(FakeConn):
+        view_udtf = None
+
+        def create_udtf_view(self, name, source=None, udtf=None, **kwargs):
+            self.view_udtf = udtf
+            return super().create_udtf_view(name, source=source, udtf=udtf, **kwargs)
+
+    table = _SelectRecordingTable(names=["video_id", "my_uri"])
+    conn = _ViewRecordingConn(table=table, is_remote=False)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    monkeypatch.setattr(mod, "runtime_session", lambda *_a, **_k: nullcontext())
+    for key in _VIDEO_ENV_KEYS:
+        monkeypatch.setenv(key, "stale")
+
+    result = CliRunner().invoke(
+        cli.chunk_videos_external,
+        [
+            "--mode",
+            "local",
+            "--config",
+            str(tmp_path / "missing.yaml"),
+            "--uri-column",
+            "my_uri",
+            "--video-endpoint",
+            "http://minio.test:9000",
+            "--video-access-key",
+            "ak",
+            "--video-secret-key",
+            "sk",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert table.selected[0] == ["video_id", "my_uri"]  # source projection
+    assert conn.view_udtf.input_columns == ["my_uri"]  # chunker declaration
+    assert set(conn.view_udtf.input_columns) <= set(table.selected[0])
+
+
 def test_chunk_external_cli_requires_video_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

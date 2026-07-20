@@ -44,10 +44,13 @@ def run(
     """Add an OpenCLIP embedding column to the frames table.
 
     By default the backfill is **incremental**: it only embeds clips whose
-    ``embedding`` is still null, so it is safe to run repeatedly and to overlap
-    with a chunk job that keeps appending new clips (each pass picks up whatever
-    landed since the last one). Pass ``reset=True`` (``--reset``) to drop the
-    column and recompute every row — e.g. after switching ``--model-name``.
+    ``embedding`` is still null, so a partial/failed run can be re-run cheaply
+    and each pass picks up whatever clips landed since the last one. Run it only
+    once the chunk job has **finished** — adding the ``embedding`` column is a
+    schema change that breaks a still-running chunker's schema-matched appends
+    (see :func:`geneva_examples.core.backfill.backfill_column`). Pass
+    ``reset=True`` (``--reset``) to drop the column and recompute every row —
+    e.g. after switching ``--model-name``.
     """
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 

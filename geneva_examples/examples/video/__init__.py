@@ -88,6 +88,7 @@ INGEST_EXTERNAL = Step(
                 "— a systematic sample across the size distribution (representative)."
             ),
         },
+        bounds={"limit": (0, None)},
     ),
 )
 
@@ -156,7 +157,7 @@ CHUNK_EXTERNAL = Step(
             "source_task_size": "Source rows per chunker task (1 = fan out per video).",
             "max_clips": "Cap clips per video (default: all).",
             "max_video_s": "Skip videos longer than this many seconds.",
-            "max_video_mb": "Skip videos larger than this many MB (guards actor RAM).",
+            "max_video_mb": "Skip videos larger than this many MB (decimal, as size_mb; bounds per-video time).",
             "read_retries": "Per-video read attempts.",
             "read_retry_sleep_s": "Base sleep (s) for read backoff.",
             "detach": "Submit and return a job id without waiting (enterprise only).",
@@ -181,7 +182,8 @@ FRAME_EMBED = Step(
             "reset": (
                 "Drop and recompute the whole embedding column (destructive). "
                 "Default off = incremental: only embed clips still missing it, "
-                "so it is safe to run alongside a chunk job and to re-run."
+                "so re-runs are cheap. Either way run it after the chunk job "
+                "completes — the column add breaks a running chunker's appends."
             ),
         },
     ),

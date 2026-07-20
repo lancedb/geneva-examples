@@ -16,6 +16,7 @@ from geneva_examples.examples import video
 from geneva_examples.examples.video.ingest_external_refs import (
     _endpoint_and_scheme,
     _resolve_video_creds,
+    _video_id,
 )
 
 _S3_CFG = dict(
@@ -137,12 +138,26 @@ def test_resolve_video_creds_bucket_optional_for_chunk():
     assert resolved[2] == "cfg-ak"
 
 
+@pytest.mark.parametrize(
+    ("path", "root", "suffix", "expected"),
+    [
+        ("vids/clip.mp4", "vids", ".mp4", "clip"),  # flat: just the basename
+        ("vids/raw/a/clip.mp4", "vids/raw", ".mp4", "a/clip"),  # nested: unique
+        ("vids/CLIP.MP4", "vids", ".mp4", "CLIP"),  # strip matches the filter
+        ("vids/clip.mp4", "vids", "", "clip.mp4"),  # no suffix -> untouched
+    ],
+)
+def test_video_id_is_root_relative_and_case_insensitive(path, root, suffix, expected):
+    assert _video_id(path, root, suffix) == expected
+
+
 def test_external_steps_registered_with_expected_params():
     ingest = video.EXAMPLE.step("ingest-videos-external")
     assert ingest.run is video.ingest_external_refs.run
     params = {p.name: p for p in ingest.params}
     assert params["suffix"].default == ".mp4"
     assert params["limit"].default == 100
+    assert params["limit"].min == 0  # negative --limit is a CLI usage error
     assert params["sample"].type is str and params["sample"].default == ""
     # Cred params default empty = "resolve from config.yaml s3_*".
     assert params["video_endpoint"].default == ""

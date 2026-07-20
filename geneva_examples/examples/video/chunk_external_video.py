@@ -148,6 +148,7 @@ def run(
         )
 
     udtf = chunk_uri_video_udtf(
+        uri_column=uri_column,
         chunk_seconds=chunk_seconds,
         manifest=manifest,
         num_cpus=num_cpus,

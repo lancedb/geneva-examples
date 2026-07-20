@@ -289,3 +289,37 @@ def test_ingest_videos_external_creds_from_config(
     assert constructed[0]["endpoint_override"] == "cfg-minio.test:9000"
     assert constructed[0]["scheme"] == "http"
     assert constructed[0]["region"] == "eu-central-1"
+
+
+def test_ingest_videos_external_rejects_negative_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # Bounded at the CLI (IntRange): a negative limit is a usage error, not an
+    # empty-selection crash deep in run().
+    infos = [_bucket_file("vids/v.mp4", 1_000_000)]
+    result, conn, _fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--limit", "-1"]
+    )
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output
+    assert "videos" not in conn.created
+
+
+def test_ingest_videos_external_ids_stay_unique_across_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # video_id is the key relative to the listing root (basenames collide when
+    # prefixes nest same-named files) and the suffix strip matches the
+    # case-insensitive listing filter.
+    infos = [
+        _bucket_file("vids/a/clip.mp4", 1_000_000),
+        _bucket_file("vids/b/clip.mp4", 2_000_000),
+        _bucket_file("vids/c/CLIP.MP4", 3_000_000),
+    ]
+    result, conn, _fs, _ = _invoke_ingest_external(monkeypatch, tmp_path, infos, [])
+    assert result.exit_code == 0, result.output
+    ids = conn.table_data.column("video_id").to_pylist()
+    assert ids == ["a/clip", "b/clip", "c/CLIP"]  # smallest-first order
+    assert len(set(ids)) == len(ids)

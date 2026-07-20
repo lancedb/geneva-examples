@@ -9,6 +9,7 @@ runtime-pip manifests are well-formed and env-overridable.
 from __future__ import annotations
 
 import importlib
+import inspect
 import io
 import types
 
@@ -236,15 +237,42 @@ def test_chunk_uri_video_udtf_skips_rows_without_credentials(monkeypatch, mp4_by
 
 
 def test_chunk_uri_video_udtf_respects_max_video_mb(monkeypatch, mp4_bytes):
+    # The cap is decimal MB, matching the videos table's size_mb column: a
+    # 2.05 MB object is over a 2.0 cap (binary MiB would let it through).
     _install_fake_video_s3(
         monkeypatch,
         {"vids/v0.mp4": mp4_bytes},
-        sizes={"vids/v0.mp4": 3 * 1024 * 1024},
+        sizes={"vids/v0.mp4": 2_050_000},
     )
     udtf = chunkers_uri.chunk_uri_video_udtf(
         chunk_seconds=1.0, manifest=None, max_video_mb=2.0
     )
     assert list(udtf.func("s3://vids/v0.mp4")) == []  # stat says too big; skipped
+    udtf = chunkers_uri.chunk_uri_video_udtf(
+        chunk_seconds=1.0, manifest=None, max_video_mb=2.1
+    )
+    assert list(udtf.func("s3://vids/v0.mp4"))  # under the cap; processed
+
+
+def test_chunk_uri_video_udtf_declares_uri_column(monkeypatch, mp4_bytes):
+    # input_columns must track uri_column so the CLI's source projection and
+    # the chunker agree (geneva validates them against each other server-side);
+    # the UDF arg is positional, so a renamed column still feeds it.
+    _install_fake_video_s3(monkeypatch, {"vids/v0.mp4": mp4_bytes})
+    udtf = chunkers_uri.chunk_uri_video_udtf(chunk_seconds=1.0, manifest=None)
+    assert udtf.input_columns == ["video_uri"]
+    udtf = chunkers_uri.chunk_uri_video_udtf(
+        uri_column="my_uri", chunk_seconds=1.0, manifest=None
+    )
+    assert udtf.input_columns == ["my_uri"]
+    assert len(list(udtf.func("s3://vids/v0.mp4"))) == 3
+
+
+def test_chunk_uri_video_udtf_default_memory_fits_geneva_field():
+    # geneva serializes the Ray memory request into a signed 32-bit field;
+    # a default of 2 * 1024**3 == 2**31 would OverflowError (see core.common).
+    params = inspect.signature(chunkers_uri.chunk_uri_video_udtf).parameters
+    assert params["memory_bytes"].default < 2**31
 
 
 def test_chunk_uri_video_udtf_handles_empty_uri(monkeypatch):
