@@ -8,6 +8,8 @@ loop — fails fast. These commands are excluded from the coverage gate.
 
 from __future__ import annotations
 
+import types
+
 import pytest
 from _fakes import FakeConn, FakeTable
 from click.testing import CliRunner
@@ -102,3 +104,227 @@ def test_cleanup_drops_tables_and_mv_siblings(monkeypatch: pytest.MonkeyPatch) -
         "video_clips_mv",
         "pdfs",
     ]
+
+
+# --- ingest-videos-external ---------------------------------------------------
+
+
+class _RecordingConn(FakeConn):
+    """FakeConn that also captures the Arrow table handed to ``create_table``."""
+
+    table_data = None
+
+    def create_table(self, name, data=None, **kwargs):
+        self.table_data = data
+        return super().create_table(name, data=data, **kwargs)
+
+
+class _FakeVideoBucketFS:
+    """``pyarrow.fs.S3FileSystem`` stand-in listing a fixed set of objects."""
+
+    def __init__(self, infos):
+        self.infos = infos
+        self.selectors = []
+
+    def get_file_info(self, selector):
+        self.selectors.append(selector)
+        return list(self.infos)
+
+
+def _bucket_file(path: str, size: int):
+    import pyarrow.fs as pafs
+
+    return types.SimpleNamespace(path=path, size=size, type=pafs.FileType.File)
+
+
+def _bucket_dir(path: str):
+    import pyarrow.fs as pafs
+
+    return types.SimpleNamespace(path=path, size=0, type=pafs.FileType.Directory)
+
+
+def _invoke_ingest_external(
+    monkeypatch, tmp_path, infos, args, *, cred_flags=True, config_text=None
+):
+    from geneva_examples.examples.video import ingest_external_refs as mod
+
+    conn = _RecordingConn(table=FakeTable(names=["video_id", "video_uri", "size_mb"]))
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    fs = _FakeVideoBucketFS(infos)
+    constructed: list[dict] = []
+
+    def _factory(**kwargs):
+        constructed.append(kwargs)
+        return fs
+
+    monkeypatch.setattr("pyarrow.fs.S3FileSystem", _factory)
+    # Always pass --config so the developer's real ./config.yaml (whose
+    # assets_s3_* block feeds the video-cred fallback) can't leak into the test.
+    config = tmp_path / "config.yaml"
+    if config_text is not None:
+        config.write_text(config_text)
+    cli_args = ["--mode", "local", "--config", str(config), "--video-bucket", "vids"]
+    if cred_flags:
+        cli_args += [
+            "--video-endpoint",
+            "http://minio.test:9000",
+            "--video-access-key",
+            "ak",
+            "--video-secret-key",
+            "sk",
+        ]
+    result = CliRunner().invoke(cli.ingest_videos_external, [*cli_args, *args])
+    return result, conn, fs, constructed
+
+
+def test_ingest_videos_external_registers_reference_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    infos = [
+        _bucket_file("vids/big.mp4", 3_000_000),
+        _bucket_file("vids/small.mp4", 1_000_000),
+        _bucket_file("vids/mid.mp4", 2_000_000),
+        _bucket_file("vids/notes.txt", 10),  # suffix-filtered out
+        _bucket_dir("vids/subdir"),  # non-file entries ignored
+    ]
+    result, conn, fs, constructed = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--limit", "2"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "videos" in conn.dropped  # overwrite=True
+    assert "videos" in conn.created
+    # The endpoint URL was peeled into a bare host + scheme for pyarrow.
+    assert constructed[0]["endpoint_override"] == "minio.test:9000"
+    assert constructed[0]["scheme"] == "http"
+    assert fs.selectors[0].base_dir == "vids"
+    assert fs.selectors[0].recursive is True
+    # Reference-only rows: smallest two, id = basename sans suffix, s3:// URI.
+    data = conn.table_data
+    assert data.column("video_id").to_pylist() == ["small", "mid"]
+    assert data.column("video_uri").to_pylist() == [
+        "s3://vids/small.mp4",
+        "s3://vids/mid.mp4",
+    ]
+    assert data.column("size_mb").to_pylist() == [1.0, 2.0]
+
+
+def test_ingest_videos_external_lists_under_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    infos = [_bucket_file("vids/raw/v.mp4", 1_000_000)]
+    result, _conn, fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--prefix", "raw"]
+    )
+    assert result.exit_code == 0, result.output
+    assert fs.selectors[0].base_dir == "vids/raw"
+
+
+def test_ingest_videos_external_stride_sample_spans_sizes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    infos = [_bucket_file(f"vids/v{i}.mp4", i * 1_000_000) for i in range(1, 11)]
+    result, conn, _fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--limit", "3", "--sample", "stride"]
+    )
+    assert result.exit_code == 0, result.output
+    # Systematic sample over the size-sorted corpus: ranks 0, 3, 7 of 10 —
+    # spanning the distribution instead of the three smallest.
+    assert conn.table_data.column("size_mb").to_pylist() == [1.0, 4.0, 8.0]
+
+
+def test_ingest_videos_external_rejects_unknown_sample(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    infos = [_bucket_file("vids/v.mp4", 1_000_000)]
+    result, conn, _fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--sample", "bogus"]
+    )
+    assert result.exit_code != 0
+    assert "unknown --sample" in str(result.exception)
+    assert "videos" not in conn.created
+
+
+def test_ingest_videos_external_errors_when_nothing_matches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    result, conn, _fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, [_bucket_file("vids/readme.txt", 10)], []
+    )
+    assert result.exit_code != 0
+    assert "no .mp4 objects" in str(result.exception)
+    assert "videos" not in conn.created
+
+
+def test_ingest_videos_external_creds_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # No --video-* cred flags: the config.yaml assets_s3_* block supplies the
+    # video-bucket credentials. A storage s3_* block is present but must NOT
+    # be consulted — the two credential sets are separate.
+    infos = [_bucket_file("vids/v.mp4", 1_000_000)]
+    result, conn, _fs, constructed = _invoke_ingest_external(
+        monkeypatch,
+        tmp_path,
+        infos,
+        [],
+        cred_flags=False,
+        config_text=(
+            "mode: local\n"
+            "s3_access_key: storage-ak\n"
+            "s3_secret_key: storage-sk\n"
+            "s3_endpoint: http://storage-minio.test:9000\n"
+            "s3_region: us-west-2\n"
+            "assets_s3_access_key: cfg-ak\n"
+            "assets_s3_secret_key: cfg-sk\n"
+            "assets_s3_endpoint: http://cfg-minio.test:9000\n"
+            "assets_s3_region: eu-central-1\n"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    assert "videos" in conn.created
+    assert constructed[0]["access_key"] == "cfg-ak"
+    assert constructed[0]["secret_key"] == "cfg-sk"  # noqa: S105 (fake test cred)
+    assert constructed[0]["endpoint_override"] == "cfg-minio.test:9000"
+    assert constructed[0]["scheme"] == "http"
+    assert constructed[0]["region"] == "eu-central-1"
+
+
+def test_ingest_videos_external_rejects_negative_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # Bounded at the CLI (IntRange): a negative limit is a usage error, not an
+    # empty-selection crash deep in run().
+    infos = [_bucket_file("vids/v.mp4", 1_000_000)]
+    result, conn, _fs, _ = _invoke_ingest_external(
+        monkeypatch, tmp_path, infos, ["--limit", "-1"]
+    )
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output
+    assert "videos" not in conn.created
+
+
+def test_ingest_videos_external_ids_stay_unique_across_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    # video_id is the key relative to the listing root (basenames collide when
+    # prefixes nest same-named files) and the suffix strip matches the
+    # case-insensitive listing filter.
+    infos = [
+        _bucket_file("vids/a/clip.mp4", 1_000_000),
+        _bucket_file("vids/b/clip.mp4", 2_000_000),
+        _bucket_file("vids/c/CLIP.MP4", 3_000_000),
+    ]
+    result, conn, _fs, _ = _invoke_ingest_external(monkeypatch, tmp_path, infos, [])
+    assert result.exit_code == 0, result.output
+    ids = conn.table_data.column("video_id").to_pylist()
+    assert ids == ["a/clip", "b/clip", "c/CLIP"]  # smallest-first order
+    assert len(set(ids)) == len(ids)

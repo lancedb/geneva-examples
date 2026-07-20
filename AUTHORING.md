@@ -202,17 +202,21 @@ and `chunk_uri_video_udtf` (opens an S3 URI on the worker).
 - **Enterprise writes are client-side**: `create_table` writes the `.lance` data files
   from the client using the connection's `storage_options`; the query-node registers the
   namespace. So the *client's* pylance version governs on-disk encoding.
-- **Extra object-store creds for the workers** (e.g. a video bucket with a *different,
-  bucket-scoped* token than the LanceDB bucket): the connection's `storage_options`
-  won't reach it. Inject them via the **manifest `env_vars`**, and read them from
-  `os.environ` inside the UDF:
+- **Object-store creds for the workers** (e.g. an assets bucket the UDFs read
+  directly): the connection's `storage_options` is not forwarded to UDFs, so the
+  task must inject creds itself via the **manifest `env_vars`** and read them from
+  `os.environ` inside the UDF. The external-refs steps resolve *what* to inject
+  as: explicit `--video-*` flags → the `assets_s3_*` block in `config.yaml`.
+  That block is deliberately **separate** from the storage `s3_*` creds (the
+  LanceDB bucket's token) — the two buckets use their own scoped tokens, and
+  neither set falls back to the other:
   ```python
   manifest = (GenevaManifest.create_pip(name)
               .pip([*VIDEO_RUNTIME_PIP])
-              .env_vars({"VIDEO_S3_ACCESS_KEY": ..., "VIDEO_S3_SECRET_KEY": ...,
-                         "VIDEO_S3_ENDPOINT": ...})
+              .env_vars({"ASSETS_S3_ACCESS_KEY": ..., "ASSETS_S3_SECRET_KEY": ...,
+                         "ASSETS_S3_ENDPOINT": ...})
               .build())
-  # …and in the UDF: pyarrow.fs.S3FileSystem(access_key=os.environ["VIDEO_S3_ACCESS_KEY"], …)
+  # …and in the UDF: pyarrow.fs.S3FileSystem(access_key=os.environ["ASSETS_S3_ACCESS_KEY"], …)
   ```
   ⚠️ **Security**: env_vars are stored in the manifest/job record and shipped to workers
   as plaintext. For production use a k8s Secret / secret store / workload identity, not

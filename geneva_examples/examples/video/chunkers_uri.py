@@ -14,7 +14,7 @@ Use this when the videos already live as native files in a **separate bucket**
 (possibly under a *different, bucket-scoped* credential) from the LanceDB tables:
 the ``videos`` table stays a pure pointer (no bytes), and only the *video* token —
 not the LanceDB token — needs access to the video bucket. The video credentials
-are injected into the worker environment (``VIDEO_S3_*``) by the chunk CLI's
+are injected into the worker environment (``ASSETS_S3_*``) by the chunk CLI's
 manifest ``env_vars`` (see :mod:`chunk_external_video`) and read back here.
 
 The output schema is identical to the other chunkers, so ``video_clips`` and the
@@ -36,19 +36,22 @@ from geneva_examples.examples.video.chunkers import VIDEO_RUNTIME_PIP  # noqa: F
 
 # The UDF reads its video-bucket credentials from these worker-env keys, set by the
 # chunk CLI via the manifest's env_vars (see chunk_external_video):
-#   VIDEO_S3_ACCESS_KEY, VIDEO_S3_SECRET_KEY, VIDEO_S3_ENDPOINT (host, required),
-#   VIDEO_S3_SCHEME (http/https), VIDEO_S3_REGION
+#   ASSETS_S3_ACCESS_KEY, ASSETS_S3_SECRET_KEY, ASSETS_S3_ENDPOINT (host, required),
+#   ASSETS_S3_SCHEME (http/https), ASSETS_S3_REGION
 # They are used as literals inside the closure below — the marshalled UDF cannot see
 # module-level globals on the remote runtime, so they can't be shared constants.
 
 
 def chunk_uri_video_udtf(
     *,
+    uri_column: str = "video_uri",
     chunk_seconds: float,
     manifest: Any,
     num_cpus: float = 1.0,
     num_gpus: float = 0.0,
-    memory_bytes: int = 2 * 1024**3,
+    # ~2 GiB; geneva serializes the Ray memory request into a signed 32-bit
+    # field, so 2 * 1024**3 == 2**31 would OverflowError (see core.common).
+    memory_bytes: int = 2**31 - 1,
     max_video_s: float | None = None,
     num_clips: int | None = None,
     max_video_mb: float | None = None,
@@ -57,15 +60,17 @@ def chunk_uri_video_udtf(
 ):
     """Build the geneva chunker that reads each video's bytes from its URI.
 
-    The UDF receives one lightweight ``video_uri`` (``s3://bucket/key.mp4``) per
-    row and **streams** it on the worker with ``pyarrow.fs.S3FileSystem`` (PyAV
-    reads only the byte ranges it seeks — the whole file is never held in RAM),
-    authenticated from the ``VIDEO_S3_*`` worker environment. Windowing/encoding is
-    identical to :func:`chunk_blob_video_udtf`; only the byte source differs.
+    The UDF receives one lightweight URI (``s3://bucket/key.mp4``) per row from
+    ``uri_column`` and **streams** it on the worker with
+    ``pyarrow.fs.S3FileSystem`` (PyAV reads only the byte ranges it seeks — the
+    whole file is never held in RAM), authenticated from the ``ASSETS_S3_*``
+    worker environment. Windowing/encoding is identical to
+    :func:`chunk_blob_video_udtf`; only the byte source differs.
 
-    ``max_video_mb`` (optional) skips objects larger than the cap *before* opening
-    them. With streaming this is no longer needed to avoid OOM (peak memory is
-    bounded by decode buffers, not file size) — it just caps per-video time on the
+    ``max_video_mb`` (optional, decimal MB to match the videos table's
+    ``size_mb``) skips objects larger than the cap *before* opening them. With
+    streaming this is no longer needed to avoid OOM (peak memory is bounded by
+    decode buffers, not file size) — it just caps per-video time on the
     multi-GB tail. ``max_video_s`` skips long videos after probe.
     """
     import geneva
@@ -84,7 +89,7 @@ def chunk_uri_video_udtf(
     cs = float(chunk_seconds)
     limit = None if max_video_s is None else float(max_video_s)
     max_clips = None if num_clips is None else int(num_clips)
-    max_bytes = None if max_video_mb is None else int(max_video_mb * 1024 * 1024)
+    max_bytes = None if max_video_mb is None else int(max_video_mb * 1_000_000)
     read_attempts = max(1, int(read_retries))
     read_sleep = float(read_retry_sleep_s)
     # Captured by the closure; the opened S3 filesystem is cached per worker actor
@@ -93,7 +98,9 @@ def chunk_uri_video_udtf(
 
     @geneva.chunker(  # ty: ignore[call-non-callable]  # third-party stub gap
         output_schema=output_schema,
-        input_columns=["video_uri"],
+        # Must match the chunk CLI's source projection (columns are passed to
+        # the UDF positionally, so the arg name below need not match).
+        input_columns=[uri_column],
         # The URI feeds the chunker but is not copied onto clip rows; `video_id`
         # (selected in the source query, not an input) is inherited onto every
         # expanded row automatically.
@@ -204,11 +211,11 @@ def chunk_uri_video_udtf(
         if fs is None:
             try:
                 fs = pafs.S3FileSystem(
-                    access_key=os.environ["VIDEO_S3_ACCESS_KEY"],
-                    secret_key=os.environ["VIDEO_S3_SECRET_KEY"],
-                    endpoint_override=os.environ["VIDEO_S3_ENDPOINT"],
-                    region=os.environ.get("VIDEO_S3_REGION", "us-east-1"),
-                    scheme=os.environ.get("VIDEO_S3_SCHEME", "https"),
+                    access_key=os.environ["ASSETS_S3_ACCESS_KEY"],
+                    secret_key=os.environ["ASSETS_S3_SECRET_KEY"],
+                    endpoint_override=os.environ["ASSETS_S3_ENDPOINT"],
+                    region=os.environ.get("ASSETS_S3_REGION", "us-east-1"),
+                    scheme=os.environ.get("ASSETS_S3_SCHEME", "https"),
                 )
             except KeyError as e:
                 log.warning(

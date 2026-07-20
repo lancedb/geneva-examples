@@ -119,6 +119,16 @@ def test_backfill_column_tolerates_missing_column_on_drop():
     assert "backfill" in table.calls
 
 
+def test_backfill_column_reset_skips_drop_when_column_absent():
+    # reset=True with no existing column: nothing to drop — the schema check
+    # short-circuits straight to add + backfill.
+    table = _Table(["video_id"])
+    _, sentinel_udf = _run(table)
+    assert "drop" not in table.calls
+    assert table.calls["add"] == {"embedding": sentinel_udf}
+    assert "backfill" in table.calls
+
+
 def test_backfill_column_incremental_keeps_existing_column():
     # reset=False on an existing column is non-destructive: no drop, no re-add.
     # The backfill fills only the null rows via the column's registered UDF — it

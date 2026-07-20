@@ -6,13 +6,16 @@ Enumerates an S3-compatible bucket of raw video files and writes a
 :func:`chunk_uri_video_udtf` chunker later opens each URI directly on the worker.
 
 This is the right ingest when the corpus already lives as native files in a
-**separate bucket** from the LanceDB tables, possibly under a *different,
-bucket-scoped* credential: the LanceDB token writes this tiny pointer table, and
-only the *video* token (below / ``VIDEO_S3_*`` env) needs read access to the
+**separate bucket** from the LanceDB tables: the LanceDB token writes this tiny
+pointer table, and only the *video* credentials (below) need read access to the
 video bucket. Nothing heavy moves through the client — ingest is seconds.
 
 Video-bucket credentials come from the ``--video-*`` options, each falling back
-to a ``VIDEO_S3_*`` environment variable when unset.
+to the matching ``assets_s3_*`` setting in ``config.yaml``. That block is
+deliberately **separate** from the storage ``s3_*`` creds (the LanceDB bucket's
+token) — the assets bucket typically uses its own bucket-scoped token, and
+neither set falls back to the other. Only the bucket name has no config
+equivalent and is always passed via ``--video-bucket``.
 """
 
 from __future__ import annotations
@@ -30,7 +33,9 @@ logger = logging.getLogger(__name__)
 def _endpoint_and_scheme(endpoint: str) -> tuple[str, str]:
     """Split an endpoint into (host[:port], scheme) for pyarrow S3FileSystem.
 
-    ``endpoint_override`` wants a bare host; accept a full URL and peel the scheme.
+    ``endpoint_override`` wants a bare host; accept a full URL and peel the
+    scheme. A bare host defaults to https — use a full ``http://`` URL for
+    plain-HTTP endpoints.
     """
     if endpoint.startswith("https://"):
         return endpoint[len("https://") :].rstrip("/"), "https"
@@ -40,30 +45,55 @@ def _endpoint_and_scheme(endpoint: str) -> tuple[str, str]:
 
 
 def _resolve_video_creds(
-    bucket: str, endpoint: str, access_key: str, secret_key: str, region: str
+    cfg: Config,
+    *,
+    bucket: str = "",
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    region: str,
+    require_bucket: bool = True,
 ) -> tuple[str, str, str, str, str]:
-    """Fill blanks from ``VIDEO_S3_*`` env; error if any required field is missing."""
-    bucket = bucket or os.environ.get("VIDEO_S3_BUCKET", "")
-    endpoint = endpoint or os.environ.get("VIDEO_S3_ENDPOINT", "")
-    access_key = access_key or os.environ.get("VIDEO_S3_ACCESS_KEY", "")
-    secret_key = secret_key or os.environ.get("VIDEO_S3_SECRET_KEY", "")
-    region = region or os.environ.get("VIDEO_S3_REGION", "us-east-1")
-    missing = [
-        name
-        for name, val in (
-            ("video_bucket", bucket),
-            ("video_endpoint", endpoint),
-            ("video_access_key", access_key),
-            ("video_secret_key", secret_key),
-        )
-        if not val
+    """Fill blanks from the config's ``assets_s3_*`` settings; error on gaps.
+
+    Explicit ``--video-*`` flags win; otherwise the ``assets_s3_*`` block in
+    ``config.yaml`` supplies the assets-bucket token. The storage ``s3_*`` creds
+    (the LanceDB bucket) are deliberately NOT consulted — the two buckets use
+    separate scoped tokens. The chunk CLI passes ``require_bucket=False`` — its
+    ``video_uri`` rows already carry the bucket.
+    """
+    endpoint = endpoint or cfg.assets_s3_endpoint or ""
+    access_key = access_key or cfg.assets_s3_access_key or ""
+    secret_key = secret_key or cfg.assets_s3_secret_key or ""
+    region = region or cfg.assets_s3_region or "us-east-1"
+    required = [
+        ("video_bucket", bucket),
+        ("video_endpoint", endpoint),
+        ("video_access_key", access_key),
+        ("video_secret_key", secret_key),
     ]
+    if not require_bucket:
+        required = required[1:]
+    missing = [name for name, val in required if not val]
     if missing:
         raise RuntimeError(
-            "missing video-bucket credentials (pass --video-* or set VIDEO_S3_*): "
-            + ", ".join(missing)
+            "missing video-bucket credentials (pass --video-* or set "
+            "assets_s3_* in config.yaml): " + ", ".join(missing)
         )
     return bucket, endpoint, access_key, secret_key, region
+
+
+def _video_id(path: str, root: str, suffix: str) -> str:
+    """Object key relative to the listing root, suffix stripped case-insensitively.
+
+    Relative-to-root rather than the basename so ids stay unique when the corpus
+    nests videos under prefixes; for a flat listing it *is* the basename. The
+    strip mirrors the case-insensitive suffix filter (``VID.MP4`` -> ``VID``).
+    """
+    rel = path[len(root) :].lstrip("/")
+    if suffix and rel.lower().endswith(suffix.lower()):
+        rel = rel[: -len(suffix)]
+    return rel
 
 
 def run(
@@ -74,7 +104,7 @@ def run(
     video_endpoint: str = "",
     video_access_key: str = "",
     video_secret_key: str = "",
-    video_region: str = "us-east-1",
+    video_region: str = "",
     prefix: str = "",
     suffix: str = ".mp4",
     limit: int = 100,
@@ -92,7 +122,12 @@ def run(
     import pyarrow.fs as pafs
 
     bucket, endpoint, access_key, secret_key, region = _resolve_video_creds(
-        video_bucket, video_endpoint, video_access_key, video_secret_key, video_region
+        cfg,
+        bucket=video_bucket,
+        endpoint=video_endpoint,
+        access_key=video_access_key,
+        secret_key=video_secret_key,
+        region=video_region,
     )
     host, scheme = _endpoint_and_scheme(endpoint)
 
@@ -134,6 +169,8 @@ def run(
             infos.sort(key=lambda i: i.size)
         picks = infos[: max(0, limit)] if limit else infos
         mode = "smallest-first" if smallest_first else "listing order"
+    if not picks:
+        raise RuntimeError(f"empty selection (limit={limit}); nothing to register")
     mean_mb = sum(i.size for i in picks) / len(picks) / 1e6
     logger.info(
         "selecting %d (%s); size min/mean/max %.1f/%.1f/%.1f MB",
@@ -146,7 +183,7 @@ def run(
 
     rows = pa.table(
         {
-            "video_id": [p.path.rsplit("/", 1)[-1].removesuffix(suffix) for p in picks],
+            "video_id": [_video_id(p.path, root, suffix) for p in picks],
             "video_uri": [f"s3://{p.path}" for p in picks],
             "size_mb": [round(p.size / 1e6, 3) for p in picks],
         },

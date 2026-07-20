@@ -9,9 +9,11 @@ opens each URI directly on the worker via ``pyarrow.fs.S3FileSystem`` and emits
 The UDTF view *is* the output table: geneva only runs a chunker inside a
 materialized view, so we create it under ``--clips-table`` and refresh in place.
 
-Video-bucket credentials (``--video-*`` / ``VIDEO_S3_*``) are injected into the
-worker environment via the manifest's ``env_vars`` — the *only* token that needs
-read access to the video bucket. The LanceDB connection uses its own (separate)
+Video-bucket credentials (``--video-*`` flags, falling back to the
+``assets_s3_*`` block in ``config.yaml`` — a token deliberately separate from
+the storage ``s3_*`` creds) are injected into the worker environment as
+``ASSETS_S3_*`` via the manifest's ``env_vars``. Only this assets token needs
+read access to the video bucket; the LanceDB connection keeps its own
 credentials for the source/clip tables.
 
 ``source_task_size=1`` (the default here) puts one video per expansion task so
@@ -52,7 +54,7 @@ def run(
     video_endpoint: str = "",
     video_access_key: str = "",
     video_secret_key: str = "",
-    video_region: str = "us-east-1",
+    video_region: str = "",
     chunk_seconds: float = 10.0,
     concurrency: int = 8,
     checkpoint_size: int = 32,
@@ -77,7 +79,12 @@ def run(
 
     # Video-bucket creds (bucket itself isn't needed here — the URIs carry it).
     _, endpoint, access_key, secret_key, region = _resolve_video_creds(
-        "n/a", video_endpoint, video_access_key, video_secret_key, video_region
+        cfg,
+        endpoint=video_endpoint,
+        access_key=video_access_key,
+        secret_key=video_secret_key,
+        region=video_region,
+        require_bucket=False,
     )
     host, scheme = _endpoint_and_scheme(endpoint)
 
@@ -116,16 +123,18 @@ def run(
     # split into a bare host + scheme so the UDF's S3FileSystem can target a
     # non-AWS S3 service on either http or https (endpoint_override wants a host).
     worker_env = {
-        "VIDEO_S3_ACCESS_KEY": access_key,
-        "VIDEO_S3_SECRET_KEY": secret_key,
-        "VIDEO_S3_ENDPOINT": host,
-        "VIDEO_S3_SCHEME": scheme,
-        "VIDEO_S3_REGION": region,
+        "ASSETS_S3_ACCESS_KEY": access_key,
+        "ASSETS_S3_SECRET_KEY": secret_key,
+        "ASSETS_S3_ENDPOINT": host,
+        "ASSETS_S3_SCHEME": scheme,
+        "ASSETS_S3_REGION": region,
     }
     if cfg.is_local:
-        # Local Ray workers share the driver env; no remote manifest to attach to.
-        for key, value in worker_env.items():
-            os.environ.setdefault(key, value)
+        # Local Ray workers share the driver env; no remote manifest to attach
+        # to. Overwrite rather than setdefault: the resolved flag/config values
+        # must win over any stale ambient ASSETS_S3_* so the UDF sees exactly
+        # what this run was asked to use.
+        os.environ.update(worker_env)
         manifest = None
     else:
         from geneva.manifest import GenevaManifest
@@ -138,6 +147,7 @@ def run(
         )
 
     udtf = chunk_uri_video_udtf(
+        uri_column=uri_column,
         chunk_seconds=chunk_seconds,
         manifest=manifest,
         num_cpus=num_cpus,
