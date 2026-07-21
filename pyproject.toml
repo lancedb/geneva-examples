@@ -51,6 +51,7 @@ ingest-pdfs = "geneva_examples.examples.cli:ingest_pdfs"
 chunk-videos = "geneva_examples.examples.cli:chunk_videos"
 chunk-videos-openvid = "geneva_examples.examples.cli:chunk_videos_openvid"
 chunk-videos-external = "geneva_examples.examples.cli:chunk_videos_external"
+chunk-videos-faults = "geneva_examples.examples.cli:chunk_videos_faults"
 chunk-pdfs = "geneva_examples.examples.cli:chunk_pdfs"
 seed-video-clips = "geneva_examples.examples.cli:seed_video_clips"
 lightweight = "geneva_examples.examples.cli:lightweight"
@@ -132,6 +133,10 @@ ignore = [
 "geneva_examples/apps/studio/runner.py" = ["S102"]
 # Tests: asserts are the point; temp paths and small fixtures are fine.
 "tests/**" = ["S101", "S102", "S108"]
+# Fault harness: an integration tool (outside the package) that shells out to a
+# container runtime with fixed args (S603), uses dummy LocalStack creds (S106),
+# and makes best-effort health/cleanup probes (BLE001).
+"fault_harness/**" = ["S603", "S106", "BLE001"]
 
 [tool.ty.environment]
 python-version = "3.12"
@@ -163,6 +168,7 @@ omit = [
     "geneva_examples/examples/*/chunk.py",
     "geneva_examples/examples/*/chunk_openvid.py",
     "geneva_examples/examples/*/chunk_external_video.py",
+    "geneva_examples/examples/*/chunk_faults.py",
     "geneva_examples/examples/*/seed.py",
     "geneva_examples/examples/images/lightweight.py",
     "geneva_examples/examples/images/embed.py",

@@ -337,6 +337,43 @@ uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if a
 skips any that are absent. Both CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
 
+## Error tracking
+
+The video chunker never silently drops a source row. Both chunker UDTFs carry a
+nullable `errors: list<string>` column with a simple contract:
+
+- `errors IS NULL` — a fully clean row (never an empty list).
+- `clip_bytes IS NOT NULL` — a playable clip; filter on this for only-playable clips.
+- Every failure produces **one typed error row** (never a vanished source), and
+  each message leads with a stable class tag so failures group in SQL:
+  `blob_read_failed[i/N]`, `decode_failed`, `no_duration`, `skipped:max_video_s`,
+  `encode_failed`, `empty_window`, `no_start_frame`, `blob_empty`, `pointer_null`.
+
+```sql
+-- how many sources failed, by class
+SELECT split_part(errors[1], ':', 1) AS class, count(*)
+FROM video_clips WHERE errors IS NOT NULL GROUP BY 1;
+```
+
+**Data faults** — run the real chunker over a poisoned corpus (local mode):
+
+```bash
+uv run chunk-videos-faults --mode local
+```
+
+`chunk-videos-faults` poisons an OpenVid-shaped corpus (corrupt / truncated /
+empty / null blobs, dangling & null pointers, raw-h264, too-long) purely through
+data — no chunker hooks — and asserts every failure lands as its expected class
+in an expected-vs-observed table, exiting non-zero on any divergence. The
+chunker's happy path carries no fault-injection code.
+
+**Transient object-store faults and recovery** — these are exercised for *real*
+against a live S3 endpoint (LocalStack) with a fault-injecting proxy, in the
+standalone [`fault_harness/`](fault_harness/) integration tool: genuine `503
+SlowDown` responses, TCP resets, stalls, and truncated reads, plus a real
+killed-process resume from Geneva checkpoints verified against a clean baseline.
+See [`fault_harness/README.md`](fault_harness/README.md).
+
 ## UDF Studio
 
 A Gradio app for prototyping UDFs and chunkers before wiring them into a stage.

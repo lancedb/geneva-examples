@@ -14,6 +14,9 @@ as PDFs with [`reportlab`](https://pypi.org/project/reportlab/).
 Each script builds its own document; the shared font registration lives in
 [`_report_common.py`](_report_common.py) (`register_fonts()`).
 
+For the chunker **fault-injection & recovery** report (rendered from real runs
+against LocalStack), see [`../fault_harness/`](../fault_harness/) instead.
+
 ## Regenerating
 
 The generated PDFs are **not** committed (they're large binaries that churn on

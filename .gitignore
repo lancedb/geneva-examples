@@ -7,6 +7,16 @@ local_db/
 video_cache/
 # local PDF ingest directory (ingest-pdfs --pdf-dir default)
 pdf_data/
+# generated analysis reports (regenerated on demand; see reports/README.md)
+reports/*.pdf
+# fault/recovery demo data dirs (chunk-videos-faults / chunk-videos-recovery)
+faults_demo_data/
+recovery_demo_data/
+# real-object-store fault harness artifacts (regenerated on demand)
+fault_harness/*.json
+fault_harness/*.pdf
+# compiled LaTeX docs (the .tex is source; PDF is regenerated with tectonic)
+docs/*.pdf
 
 # UDF Studio sample data: keep the directory layout, ignore user-provided media.
 studio_data/images/*

@@ -1,0 +1,368 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage[hidelinks]{hyperref}
+
+% Inline code helper (escape underscores as \_ inside arguments).
+\newcommand{\ct}[1]{\texttt{\small #1}}
+
+\definecolor{codebg}{gray}{0.96}
+\definecolor{kw}{rgb}{0.10,0.25,0.55}
+\definecolor{cm}{gray}{0.45}
+\definecolor{st}{rgb}{0.10,0.45,0.15}
+
+\lstdefinestyle{py}{
+  language=Python,
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{kw}\bfseries,
+  commentstyle=\color{cm}\itshape,
+  stringstyle=\color{st},
+  showstringspaces=false,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framesep=4pt,
+  rulecolor=\color{gray!40},
+  aboveskip=6pt, belowskip=6pt,
+}
+
+\captionsetup{font=small,labelfont=bf}
+
+\title{\vspace{-1.5em}Catching Failures Before Customers Do:\\
+Real Fault Injection and Recovery for a Video Chunking Pipeline}
+\author{Justin Miller\\\small LanceDB --- Geneva DevEx}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+
+\begin{abstract}
+\noindent
+We describe the fault-tolerance design and testing harness for the Geneva video
+\emph{chunker}: the stage that expands each source video into fixed-length clips.
+The chunker guarantees that no source row is ever silently dropped---every
+failure becomes a typed error row under a small, stable contract. We then
+validate that guarantee against the failures customers actually hit, using
+\emph{real} fault injection rather than in-process mocks: transient object-store
+faults are produced as genuine HTTP/TCP events by a reverse proxy in front of a
+live S3-compatible endpoint (LocalStack), and mid-run worker loss is produced by
+\ct{SIGKILL}ing a real refresh process and resuming from on-disk Geneva
+checkpoints. A machine-checked harness asserts the observed behaviour against the
+contract and a clean baseline, exits non-zero on any divergence, and renders a
+report from the measured results. We report the outcomes and discuss the design
+choices that make the faults real and the checks non-vacuous.
+\end{abstract}
+
+\section{Introduction}
+
+Media-ingestion pipelines fail in messy ways: a video file is truncated, an
+object store throttles a burst of reads, a spot instance is reclaimed mid-job.
+The goal of this work is narrow and practical---\emph{find these failures in the
+package we hand customers before they do}, and have a credible recovery story
+when they occur. We scope the effort to a single, representative stage: the
+video chunker, end to end.
+
+Three classes of failure matter for this stage:
+
+\begin{enumerate}[itemsep=1pt,topsep=2pt]
+  \item \textbf{Data faults} --- deterministic and permanent: corrupt bytes, a
+  truncated container, an empty or missing blob, a dangling pointer.
+  \item \textbf{Transient object-store faults} --- non-deterministic: read
+  timeouts, throttling (\ct{HTTP 503 SlowDown}), connection resets, and partial
+  (short) reads that data poisoning cannot reproduce.
+  \item \textbf{Worker loss} --- a process dies partway through a job (OOM kill,
+  node failure, reclamation), and the job must resume without recomputing what
+  already finished.
+\end{enumerate}
+
+Our contribution is twofold. First, an error-reporting \emph{contract} on the
+chunker's output that turns every failure into an inspectable, groupable error
+row instead of a silent drop. Second, a testing harness that validates the
+contract against \emph{real} faults---real wire-level object-store errors and a
+real killed process---and verifies recovery against a byte-for-byte baseline. The
+chunker's own code path carries no fault-injection hooks; its happy path is
+unmodified.
+
+\section{Background: the Geneva chunker}
+
+Geneva materializes derived columns and row expansions as \emph{materialized
+views} (MVs) over LanceDB tables. The chunker is a \emph{one-to-many} MV: each
+source video row expands into many clip rows. Such a view is created with
+\emph{placeholder} rows and populated incrementally by \ct{view.refresh()};
+refresh is checkpointed per fragment, so a partially-completed refresh can be
+resumed and only unfinished fragments are recomputed. This property is the
+foundation of the recovery story in Section~\ref{sec:recovery}.
+
+The source \ct{videos} table is \emph{reference-only}: it stores metadata plus a
+lightweight pointer (a row id), not the video bytes. On each worker the chunker
+reads the blob itself directly from the source dataset:
+
+\begin{lstlisting}[style=py]
+blobs = dataset.take_blobs(blob_column, ids=[row_id])
+video = blobs[0].readall()
+\end{lstlisting}
+
+\noindent
+This keeps heavy byte movement cluster-side and off the client. It is also the
+single I/O boundary at which transient object-store faults occur, and thus the
+boundary our injection targets. In local mode the view is materialized on an
+on-disk LanceDB database and refresh runs on a local Ray cluster; in enterprise
+mode the same code runs against the remote Geneva runtime.
+
+\section{The error contract}
+
+Both chunker factories emit an output schema carrying a nullable
+\ct{errors: list<string>} column. The contract has three invariants:
+
+\begin{itemize}[itemsep=1pt,topsep=2pt]
+  \item \ct{errors IS NULL} marks a fully clean row (never an empty list).
+  \item \ct{clip\_bytes IS NOT NULL} marks a playable clip; consumers select
+  only playable clips with this predicate.
+  \item \textbf{No source row is ever silently dropped.} A whole-video failure
+  yields exactly one row with null window fields and the message(s); a
+  per-window failure yields that window's row with the failed value null.
+\end{itemize}
+
+Every message leads with a stable \emph{class tag}---the text before the first
+\ct{:} or \ct{[}---so failures group in SQL:
+
+\begin{lstlisting}[style=py]
+SELECT split_part(errors[1], ':', 1) AS class, count(*)
+FROM video_clips WHERE errors IS NOT NULL GROUP BY 1;
+\end{lstlisting}
+
+\noindent
+Table~\ref{tab:classes} lists the classes. Blob reads retry transient errors with
+exponential backoff, recording \emph{one} \ct{blob\_read\_failed[i/N]} message
+per failed attempt, so the full retry history survives on the error row rather
+than being collapsed to a single line.
+
+\begin{table}[t]
+\centering
+\caption{Error classes emitted by the chunker.}
+\label{tab:classes}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Class tag} & \textbf{Stage} & \textbf{Cause} \\
+\midrule
+\ct{pointer\_null}        & resolve & pointer column is null \\
+\ct{blob\_missing}        & resolve & \ct{take\_blobs} returned nothing \\
+\ct{blob\_empty}          & resolve & zero-length blob \\
+\ct{blob\_read\_failed[i/N]} & resolve & read attempt $i$ of $N$ failed (transient) \\
+\ct{decode\_failed}       & decode  & bytes are not a decodable video \\
+\ct{no\_duration}         & decode  & no container/stream duration to window \\
+\ct{skipped:max\_video\_s} & decode  & longer than the configured ceiling \\
+\ct{encode\_failed}       & window  & a single window failed to encode \\
+\ct{empty\_window}        & window  & zero-packet remux (no clip bytes) \\
+\ct{no\_start\_frame}     & window  & clip produced but no decodable frame \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The retry loop is the only fault-relevant machinery in the happy path, and it is
+deliberately ordinary:
+
+\begin{lstlisting}[style=py]
+for attempt in range(read_attempts):
+    try:
+        ds = ds_cache.get("ds") or lance.dataset(src_uri,
+                                    storage_options=storage_opts)
+        blobs = ds.take_blobs(blob_col, ids=[rid])
+        ...
+        video = bf.readall()
+        break
+    except Exception as e:                    # transient read: retry/log
+        attempt_errors.append(f"blob_read_failed[{attempt+1}/{N}]: "
+                              f"{type(e).__name__}: {e}")
+        ds_cache.pop("ds", None)              # drop handle; reopen next try
+        if attempt + 1 < read_attempts:
+            time.sleep(read_sleep * (2 ** attempt))
+\end{lstlisting}
+
+\section{Fault injection methodology}
+\label{sec:methodology}
+
+The harness exercises the three failure classes with escalating realism. A guiding
+principle throughout is that a \emph{simulated} fault (raising an exception
+in-process to stand in for a 503) proves only that our own \ct{except} clause
+runs; it does not prove the system survives what the object store actually does
+on the wire. We therefore drive the transient and worker-loss cases against real
+infrastructure.
+
+\subsection{Data faults}
+
+A corpus is poisoned purely through data---corrupt / truncated / empty / null
+blobs, dangling and null pointers, a raw H.264 elementary stream (no container
+duration), and an over-long video---and chunked through the \emph{unchanged}
+pipeline. Because the faults are in the bytes, every resulting error row is
+produced by the same code path a real run would take. The harness asserts each
+source lands in its expected class (Table~\ref{tab:classes}).
+
+\subsection{Transient object-store faults}
+\label{sec:transient}
+
+Transient faults are injected as real HTTP/TCP events by a small reverse proxy,
+\ct{S3FaultProxy}, placed between the chunker and a live LocalStack S3 endpoint.
+The chunker reads \ct{s3://} through the proxy; the corpus is written directly to
+LocalStack (bypassing the proxy). The proxy forwards every request untouched
+\emph{except} the ranged \ct{GET}s of Lance data files---the blob byte
+reads---so dataset-open (bucket listing and manifest reads) always succeeds and
+only the read under test is faulted. Four fault kinds are produced on the wire:
+
+\begin{itemize}[itemsep=1pt,topsep=2pt]
+  \item \textbf{Throttling}: a genuine \ct{HTTP 503 Slow Down} response with the
+  S3 \ct{<Error><Code>SlowDown</Code></Error>} XML body.
+  \item \textbf{Connection reset}: an abrupt TCP RST (\ct{SO\_LINGER 0}) mid-request.
+  \item \textbf{Read timeout}: the socket stalls past the client's request timeout.
+  \item \textbf{Short read}: a \ct{200 OK} with the true \ct{Content-Length} but a
+  truncated body, so the client detects an incomplete read.
+\end{itemize}
+
+\begin{lstlisting}[style=py]
+if kind == "throttle":       # real 503 SlowDown with S3 XML body
+    self.send_response(503); self.wfile.write(SLOWDOWN_XML)
+elif kind == "reset":        # real TCP RST
+    self.connection.setsockopt(SOL_SOCKET, SO_LINGER, pack("ii", 1, 0))
+    self.connection.close()
+elif kind == "timeout":      # stall past the client request timeout
+    time.sleep(stall_s); self.connection.close()
+elif kind == "short_read":   # 200 + real Content-Length, truncated body
+    self.wfile.write(body[: len(body) // 3])
+\end{lstlisting}
+
+Two knobs make the outcomes deterministic and the interaction legible. First, the
+proxy can fault the first $N$ matching requests then pass through
+(\emph{fail-$N$-then-succeed}) or fault every one (\emph{exhaust-all-retries}).
+Second, the object-store client's own retry budget is capped
+(\ct{client\_max\_retries=0} via \ct{storage\_options}) so that each fault
+surfaces immediately and the chunker's own \ct{read\_retries} loop---the code we
+are testing---is what drives recovery, rather than an opaque retry layer beneath
+it. The chunker gained one small, general parameter (\ct{storage\_options},
+forwarded to \ct{lance.dataset}); it contains no fault logic.
+
+\subsection{Killed-worker recovery}
+\label{sec:recovery}
+
+Worker loss is produced by killing a real process. A real Geneva chunk refresh
+runs in a child process; the parent polls the growing clips table and, once
+some---but not all---videos have been materialized, sends \ct{SIGKILL} to the
+child. This models an OOM kill or node failure far more faithfully than a raised
+exception: a \ct{SIGKILL} cannot be caught, and it leaves whatever fragments had
+already committed on disk. The parent then cleans up any orphaned Ray processes
+and \emph{resumes} by reopening the same materialized view and calling
+\ct{refresh()} again. Geneva loads the checkpointed fragments and recomputes only
+the interrupted work. Finally the resumed table is compared, per video, against a
+clean no-fault baseline.
+
+\section{Verification}
+
+The harness is only useful if its checks fail when reality diverges. Each case
+carries an explicit, machine-checked assertion:
+
+\begin{itemize}[itemsep=1pt,topsep=2pt]
+  \item \textbf{Recover cases} (fail-$N$-then-succeed): the row must come back
+  \emph{exactly} clean (\ct{observed == [clean]})---the retry genuinely worked.
+  \item \textbf{Exhaust cases}: the source must yield \emph{exactly one} row, it
+  must be a typed error row (\ct{blob\_read\_failed}, no playable clip), and no
+  \ct{clean} row may appear---proving the failure is reported once and never
+  dropped.
+  \item \textbf{Recovery}: the kill must land mid-run with $0 < k < n$ videos
+  checkpointed, and the resumed table must equal the baseline per video (clip
+  counts \emph{and} error classes).
+\end{itemize}
+
+Any divergence appends to a failure list; a non-empty list logs each failure and
+returns a non-zero exit code. To confirm the checks are not vacuous, we ran a
+\emph{negative control}: expectations for one exhaust case were deliberately
+inverted to expect \ct{clean}. The harness observed the real
+\ct{blob\_read\_failed}, reported \ct{CHECK FAILED}, and exited non-zero---then
+returned to green once the expectation was corrected.
+
+\section{Results}
+
+All results below are measured directly from the runs (geneva 0.14.0; LocalStack
+S3 via the fault proxy; local Geneva + Ray for recovery). Overall outcome:
+\textbf{PASS}.
+
+\begin{table}[t]
+\centering
+\caption{Transient object-store faults (real HTTP/TCP events). ``Faults'' is the
+number of proxy-injected failures; ``s'' is wall-clock seconds.}
+\label{tab:transient}
+\small
+\begin{tabular}{@{}llrlll@{}}
+\toprule
+\textbf{Fault} & \textbf{Mode} & \textbf{Faults} & \textbf{Expected} & \textbf{Observed} & \textbf{s} \\
+\midrule
+read timeout        & recover & 1  & clean            & clean            & 2.0 \\
+read timeout        & exhaust & 12 & blob\_read\_failed & blob\_read\_failed & 24.4 \\
+503 SlowDown        & recover & 1  & clean            & clean            & 0.4 \\
+503 SlowDown        & exhaust & 48 & blob\_read\_failed & blob\_read\_failed & 7.4 \\
+connection reset    & recover & 1  & clean            & clean            & 0.1 \\
+connection reset    & exhaust & 12 & blob\_read\_failed & blob\_read\_failed & 0.4 \\
+partial/short read  & exhaust & 12 & blob\_read\_failed & blob\_read\_failed & 0.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:transient} shows every transient case matching its expectation.
+The three recover cases return a clean, fully-chunked row---the chunker's backoff
+absorbs the transient---while the four exhaust cases each land as a single typed
+\ct{blob\_read\_failed[N/N]} row carrying the full attempt history, with no source
+dropped. Data faults matched identically: \ct{good}$\to$\ct{clean} (2 clips),
+\ct{garbage}$\to$\ct{decode\_failed}, \ct{too-long}$\to$\ct{skipped}.
+
+For recovery, a 10-source corpus (16 baseline clips) was chunked in a child
+process that was \ct{SIGKILL}ed after \textbf{8 of 10} videos had checkpointed.
+After orphaned-Ray cleanup, a fresh process reopened the view and completed the
+refresh; the resumed table matched the baseline for all ten videos---identical
+clip counts and error classes (\ct{good-0..7} at 2 clips each,
+\ct{garbage}$\to$\ct{decode\_failed}, \ct{too-long}$\to$\ct{skipped}). Only the
+two videos left unfinished at kill time were recomputed on resume.
+
+\section{Discussion and limitations}
+
+\paragraph{Realism has a cost.} The transient and recovery harnesses depend on
+infrastructure (a container runtime for LocalStack; a local Ray cluster) and take
+tens of seconds each, so they are on-demand integration tools rather than unit
+tests in CI. The unit suite instead pins the error contract with driver-callable
+tests over poisoned data---fast and deterministic---while the real harnesses
+cover the wire behaviour that unit tests cannot.
+
+\paragraph{Timing.} The \ct{read timeout} exhaust case is slow (Table~\ref{tab:transient})
+because each faulted attempt genuinely stalls to the client timeout; this is a
+property of a faithful timeout, not overhead. The kill in the recovery run is
+timing-based: the parent polls until partial progress exists before signalling,
+and single-threaded refresh makes ``partial'' easy to catch deterministically.
+
+\paragraph{Orphan cleanup.} A \ct{SIGKILL}ed child leaves its Ray workers
+orphaned; the harness force-stops Ray before resuming so the resume starts a
+clean cluster. This is the one piece of environment hygiene the real kill
+requires.
+
+\paragraph{From simulated to real.} An earlier iteration injected transient
+faults in-process by raising synthetic exceptions at the read boundary. That
+approach was removed: it proved only that our \ct{except} clause ran, and it put
+fault logic in the chunker's happy path. Moving injection onto the wire kept the
+chunker clean and made the 503, reset, timeout, and short-read cases genuine.
+
+\section{Conclusion}
+
+The video chunker turns every failure into an inspectable, typed error row and
+never silently drops a source, and it resumes correctly from mid-run worker loss.
+We validated both properties against real faults---genuine object-store errors on
+the wire and a genuinely killed process---with machine-checked assertions that we
+confirmed are non-vacuous. The result is a package we can hand customers with a
+tested failure story rather than an assumed one.
+
+\end{document}
