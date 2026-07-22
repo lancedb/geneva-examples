@@ -7,13 +7,16 @@ dependencies = [
     "typer>=0.24.0",
     "pyyaml>=6.0",
     # Pin the LanceDB stack to the versions the deployed cluster was built
-    # against (client/server must match or declare_table 500s). pylance 9.0.x
-    # lives on the lance-format index (see [tool.uv.sources]). pyarrow/numpy are
-    # left to geneva's own constraints. geneva 0.14.0 (final, from public PyPI)
-    # requires python <3.14 — hence the requires-python upper bound above.
+    # against (client/server must match or declare_table/backfill_column 500s).
+    # pylance 9.x betas live on the lance-format index (see [tool.uv.sources]).
+    # pyarrow/numpy are left to geneva's own constraints. geneva 0.14.0 (final,
+    # from public PyPI) requires python <3.14 — hence the requires-python upper
+    # bound above. Older pylance (8.x)/lancedb (0.33) spoke a different
+    # namespace API, so add_columns would succeed but backfill_column returned
+    # "column not found".
     "geneva==0.14.0",
-    "pylance==9.0.0b15",
-    "lancedb==0.34.0b4",
+    "lancedb==0.34.0b5",
+    "pylance>=9.0.0b15",
     "pyarrow",
     "numpy",
     "pillow>=10",

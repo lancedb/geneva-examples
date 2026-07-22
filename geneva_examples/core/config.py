@@ -49,14 +49,15 @@ def _as_bool(value: object) -> bool:
 
 @dataclass
 class Config:
-    """Resolved configuration: connection mode + two S3-compatible credential sets.
+    """Resolved configuration: connection mode + independent credential sets.
 
     ``s3_*`` (no prefix) is the **storage bucket** — the connection's
     ``storage_options``, i.e. the token that reads/writes the LanceDB data
-    files. ``assets_s3_*`` is the **assets bucket** — a separate (typically
-    bucket-scoped) token the external-refs video steps use to enumerate and
-    stream raw videos. The two are deliberately independent: neither falls
-    back to the other.
+    files (``azure_account_*`` is its Azure equivalent; see
+    :meth:`storage_options`). ``assets_s3_*`` is the **assets bucket** — a
+    separate (typically bucket-scoped) token the external-refs video steps use
+    to enumerate and stream raw videos. The sets are deliberately independent:
+    none falls back to another.
     """
 
     mode: str = DEFAULT_MODE
@@ -70,6 +71,8 @@ class Config:
     s3_endpoint: str | None = None
     s3_region: str | None = None
     aws_allow_http: bool = False
+    azure_account_name: str | None = None
+    azure_account_key: str | None = None
     assets_s3_access_key: str | None = None
     assets_s3_secret_key: str | None = None
     assets_s3_endpoint: str | None = None
@@ -82,7 +85,18 @@ class Config:
         return self.mode == "local"
 
     def storage_options(self) -> dict[str, str] | None:
-        """Build S3 ``storage_options``; ``None`` unless all four creds present."""
+        """Build object-store ``storage_options`` for the data plane.
+
+        Azure (account name + key) takes precedence; else S3-compatible when all
+        four creds are present; else ``None``. Enterprise clients write Lance
+        data fragments directly to object storage, so the account-less
+        ``az://<container>`` root URI needs the account named here.
+        """
+        if self.azure_account_name and self.azure_account_key:
+            return {
+                "azure_storage_account_name": self.azure_account_name,
+                "azure_storage_account_key": self.azure_account_key,
+            }
         if not (
             self.s3_access_key
             and self.s3_secret_key
@@ -167,6 +181,8 @@ def load_config(
         s3_endpoint=data.get("s3_endpoint"),
         s3_region=data.get("s3_region"),
         aws_allow_http=_as_bool(data.get("aws_allow_http")),
+        azure_account_name=data.get("azure_account_name"),
+        azure_account_key=data.get("azure_account_key"),
         assets_s3_access_key=data.get("assets_s3_access_key"),
         assets_s3_secret_key=data.get("assets_s3_secret_key"),
         assets_s3_endpoint=data.get("assets_s3_endpoint"),
