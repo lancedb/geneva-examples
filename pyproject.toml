@@ -2,18 +2,19 @@
 name = "geneva-examples"
 version = "0.1.0"
 description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Enterprise, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "typer>=0.24.0",
     "pyyaml>=6.0",
     # Pin the LanceDB stack to the versions the deployed cluster was built
     # against (client/server must match or declare_table/backfill_column 500s).
-    # pylance 9.0.x lives on the lance-format index (see [tool.uv.sources]).
-    # pyarrow/numpy are left to geneva's own constraints. This set matches the
-    # data plane's geneva 0.13.0b30 build (see sophon lancedb_integtest pins):
-    # older pylance (8.x)/lancedb (0.33) spoke a different namespace API, so
-    # add_columns would succeed but backfill_column returned "column not found".
-    "geneva==0.13.0b30",
+    # pylance 9.x betas live on the lance-format index (see [tool.uv.sources]).
+    # pyarrow/numpy are left to geneva's own constraints. geneva 0.14.0 (final,
+    # from public PyPI) requires python <3.14 — hence the requires-python upper
+    # bound above. Older pylance (8.x)/lancedb (0.33) spoke a different
+    # namespace API, so add_columns would succeed but backfill_column returned
+    # "column not found".
+    "geneva==0.14.0",
     "lancedb==0.34.0b5",
     "pylance>=9.0.0b15",
     "pyarrow",
@@ -48,9 +49,11 @@ tui = "geneva_examples.tui.app:main"
 ingest-images = "geneva_examples.examples.cli:ingest_images"
 ingest-videos = "geneva_examples.examples.cli:ingest_videos"
 ingest-videos-openvid = "geneva_examples.examples.cli:ingest_videos_openvid"
+ingest-videos-external = "geneva_examples.examples.cli:ingest_videos_external"
 ingest-pdfs = "geneva_examples.examples.cli:ingest_pdfs"
 chunk-videos = "geneva_examples.examples.cli:chunk_videos"
 chunk-videos-openvid = "geneva_examples.examples.cli:chunk_videos_openvid"
+chunk-videos-external = "geneva_examples.examples.cli:chunk_videos_external"
 chunk-pdfs = "geneva_examples.examples.cli:chunk_pdfs"
 seed-video-clips = "geneva_examples.examples.cli:seed_video_clips"
 lightweight = "geneva_examples.examples.cli:lightweight"
@@ -78,7 +81,9 @@ prerelease = "allow"
 
 # Two Gemfury indexes, both `explicit` so only the packages pinned in
 # [tool.uv.sources] resolve from them; everything else stays on PyPI:
-#   - lancedb       → geneva, lancedb
+#   - lancedb       → lancedb (beta). NOTE: geneva's *final* 0.14.0 ships on
+#                     public PyPI, not Gemfury (only 0.14.0b0 lives here), so
+#                     geneva is intentionally NOT pinned to this index.
 #   - lance-format  → pylance (7.x+ betas live here, not on the lancedb repo)
 [[tool.uv.index]]
 name = "lancedb"
@@ -91,7 +96,6 @@ url = "https://pypi.fury.io/lance-format/"
 explicit = true
 
 [tool.uv.sources]
-geneva = { index = "lancedb" }
 lancedb = { index = "lancedb" }
 pylance = { index = "lance-format" }
 
@@ -158,8 +162,10 @@ omit = [
     # backfill runner (core/backfill.py) and the spec/registry ARE fully tested.
     "geneva_examples/examples/*/ingest.py",
     "geneva_examples/examples/*/ingest_openvid.py",
+    "geneva_examples/examples/*/ingest_external_refs.py",
     "geneva_examples/examples/*/chunk.py",
     "geneva_examples/examples/*/chunk_openvid.py",
+    "geneva_examples/examples/*/chunk_external_video.py",
     "geneva_examples/examples/*/seed.py",
     "geneva_examples/examples/images/lightweight.py",
     "geneva_examples/examples/images/embed.py",
@@ -185,6 +191,7 @@ omit = [
     "geneva_examples/examples/_shared/blip.py",
     "geneva_examples/examples/video/openpose.py",
     "geneva_examples/examples/video/chunkers.py",
+    "geneva_examples/examples/video/chunkers_uri.py",
 ]
 
 [tool.coverage.report]

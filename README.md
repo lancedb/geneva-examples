@@ -36,6 +36,11 @@ Each example's spec is import-cheap; the UDF bodies are self-contained closures
 whose imports/helpers nest inside the factory so they ship to remote Geneva
 workers via the pinned pip manifests (enterprise), or run on local Ray (local).
 
+Two newcomer guides go deeper: [`AUTHORING.md`](AUTHORING.md) — how to add
+tasks, UDFs, and params, with the external-refs video pipeline as the worked
+example — and [`CLI_ARCHITECTURE.md`](CLI_ARCHITECTURE.md) — how the
+`Example → Step → Param` spec generates the CLIs and the TUI.
+
 ## Architecture
 
 The CLIs run **on your machine** (the driver): ingest CLIs load source data into
@@ -53,10 +58,11 @@ below shows the enterprise topology.
 flowchart LR
   HF[("Hugging Face<br/>images / videos")]
   LOCAL[("local PDFs")]
+  VIDBUCKET[("external video bucket<br/>(raw MP4s, S3-compatible)")]
 
   subgraph driver["Your machine (driver / CLIs)"]
     ING["ingest-images<br/>ingest-videos<br/>ingest-pdfs"]
-    CHUNK["chunk-videos"]
+    CHUNK["chunk-videos<br/>chunk-videos-external"]
     STAGES["lightweight / embed / caption<br/>frame-embed / frame-caption / frame-openpose<br/>chunk-pdfs"]
     OPS["stats / jobs"]
   end
@@ -74,7 +80,9 @@ flowchart LR
   ING --> IMAGES
   ING --> VIDEOS
   ING --> PDFS
+  VIDBUCKET -. "ingest-videos-external<br/>lists keys -> pointer rows" .-> VIDEOS
   VIDEOS --> CHUNK --> CLIPS
+  VIDBUCKET -. "workers stream clips by URI" .-> WORKERS
   STAGES -- "submit backfill" --> WORKERS
   WORKERS -- "add feature columns" --> IMAGES
   WORKERS -- "add feature columns" --> CLIPS
@@ -102,7 +110,7 @@ geneva-examples/
 │   │   ├── cli.py                    # generated console-script commands (one per step)
 │   │   ├── _shared/                  # model UDFs shared across examples (clip, blip)
 │   │   ├── images/                   # __init__ (spec) + imageinfo + ingest/lightweight/embed/caption
-│   │   ├── video/                    # spec + chunkers/openpose + ingest/chunk/frame-*/seed
+│   │   ├── video/                    # spec + chunkers (bytes/blob/URI) + ingest/chunk (+ openvid/external) + frame-*/seed
 │   │   └── pdf/                      # spec + document UDFs + ingest/chunk
 │   ├── tui/                          # Textual TUI (app.py) + form helpers (forms.py)
 │   ├── ops/                          # inspection/teardown CLIs: stats, jobs, cleanup
@@ -115,9 +123,12 @@ geneva-examples/
 │   └── test_*.py                     # unit tests + CliRunner wiring smoke tests
 ├── reports/                          # author-only PDF write-ups (reportlab; macOS fonts; not packaged)
 ├── studio_data/                      # UDF Studio sample-data dir (media gitignored; input.csv tracked)
-├── config-example.yaml              # config.yaml template — copy and fill in
+├── config-example-local.yaml         # config.yaml template (local mode) — copy and fill in
+├── config-example-enterprise.yaml    # config.yaml template (enterprise mode)
 ├── pyproject.toml                    # deps, cluster pins, Gemfury indexes, ruff/ty/pytest/coverage config
 ├── Makefile                          # dev tasks: install, check, audit, lint, format, test, typecheck…
+├── AUTHORING.md                      # how to add tasks/UDFs/params (worked example: the external-refs video pipeline)
+├── CLI_ARCHITECTURE.md               # how the Example → Step → Param spec generates the CLIs + TUI
 ├── CONTRIBUTING.md                   # setup, conventions, how to add a UDF or stage
 ├── SECURITY.md                       # security policy
 └── .github/
@@ -200,9 +211,9 @@ cp config-example-enterprise.yaml config.yaml
 # edit config.yaml — fill in lancedb_api_key, lancedb_region, geneva_host
 ```
 
-`config.yaml` is gitignored; `config-example.yaml` documents every option, and
-`config-example-local.yaml` / `config-example-enterprise.yaml` are per-mode
-templates.
+`config.yaml` is gitignored; `config-example-local.yaml` and
+`config-example-enterprise.yaml` are per-mode templates that document every
+option.
 
 | Key               | Required        | Default           | Description                                   |
 | ----------------- | --------------- | ----------------- | --------------------------------------------- |
@@ -212,7 +223,9 @@ templates.
 | `lancedb_region`  | enterprise only | —                 | LanceDB Enterprise region.                     |
 | `geneva_host`     | enterprise only | —                 | Reachable Geneva runtime URL (load balancer). |
 | `db_uri`          | no              | `db://quickstart` | Database URI (enterprise); ignored locally.   |
-| `s3_*`            | no              | —                 | S3 storage creds (all four or none).          |
+| `s3_*`            | no              | —                 | **Storage-bucket** creds (all four or none): the connection's `storage_options` for the LanceDB data files. |
+| `assets_s3_*`     | no              | —                 | **Assets-bucket** creds (all four or none): a separate token for the raw-video bucket used by the external-refs video steps (override with `--video-*`). Neither set falls back to the other. |
+| `aws_allow_http`  | no              | `false`           | Allow plain-HTTP object storage (e.g. MinIO) for the connection's `storage_options`. |
 | `hf_token`        | no              | —                 | Hugging Face token (raises HF rate limits).   |
 
 In enterprise mode a missing `config.yaml`, or one missing any required field,
@@ -263,9 +276,27 @@ uv run frame-openpose  # OpenPose pose-skeleton PNG on each clip's frame
 uv run cleanup         # drop the `videos` + `video_clips` tables
 ```
 
-There is also an OpenVid variant (`ingest-videos-openvid` → `chunk-videos-openvid`)
-that registers reference-only rows and chunks by reading the blob from the source
-dataset, plus `seed-video-clips` for load-testing the frame stages without a full
+Two reference-only variants skip moving video bytes through the client:
+
+- **OpenVid** (`ingest-videos-openvid` → `chunk-videos-openvid`) registers
+  pointer rows and chunks by reading each blob from the source Lance dataset on
+  the worker.
+- **External bucket** (`ingest-videos-external` → `chunk-videos-external`) is
+  for a corpus that already lives as native files in an S3-compatible bucket:
+  ingest enumerates the bucket and writes a pointer-only `videos` table
+  (`video_id` + `video_uri` + `size_mb`, no bytes — it takes seconds), and the
+  chunker streams each URI on the worker with `pyarrow.fs.S3FileSystem` + PyAV
+  seeking, so peak memory is bounded by decode buffers, not file size.
+  Credentials come from the `assets_s3_*` block in `config.yaml` — a separate,
+  typically bucket-scoped token from the storage `s3_*` creds — overridable
+  per-command with the `--video-*` flags. `--sample stride` registers a pilot
+  set that mirrors the corpus's size distribution instead of its smallest tail.
+
+`frame-embed` is **incremental by default**: it only embeds clips whose
+`embedding` is still null, so a partial/failed run can be re-run cheaply — run
+it after the chunk job completes (the column add breaks a running chunker's
+appends), and pass `--reset` to drop and recompute everything, e.g. after
+switching models. `seed-video-clips` load-tests the frame stages without a full
 chunk run. Run any CLI with `--help` for its options (e.g. `--chunk-seconds`,
 `--model-name`/`--pretrained`/`--dim` on `frame-embed`).
 
@@ -345,6 +376,7 @@ uv run udf-studio --data-dir ~/my-samples --library ~/udf-lib
 | **A feature column stays `NULL` after a stage** | The backfill is async. Check it with `uv run jobs` (add `--all` for terminal states). A stage logs `null_<column>` once it returns — a non-zero count means rows were skipped (e.g. unreadable input). |
 | **`required columns not visible`** | `add_columns` hasn't propagated yet. Raise `--schema-wait-attempts` / `--schema-wait-sleep-s` on the stage. |
 | **Job stuck PENDING or running slowly** | Inspect with `uv run jobs`; cancel with `uv run jobs kill <job_id>`. The cluster needs free (GPU) capacity for the embed/caption/openpose stages. |
+| **`missing video-bucket credentials`** | The external-refs video steps need the assets bucket's S3 creds: set the `assets_s3_*` block in `config.yaml` (used by default) or pass the `--video-*` flags. The storage `s3_*` creds are deliberately not used for this. |
 | **HF rate limits during ingest** | Set `hf_token` in `config.yaml`. |
 
 Every stage exposes the backfill knobs as CLI options (see `--help`); defaults are

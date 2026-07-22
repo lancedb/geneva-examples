@@ -15,5 +15,16 @@ local_db_path: "./local_db"
 
 # Table names aren't config — each CLI has its own --table-name default.
 
+# --- Assets-bucket credentials (optional; all four or none) ---
+# The on-disk database needs no storage creds, but the external-refs video
+# steps (`ingest-videos-external` / `chunk-videos-external`) work in local
+# mode too; this is the token for the raw-video assets bucket they enumerate
+# and stream from. Overridable per-command with the --video-* flags. Use a
+# full http:// URL for a plain-HTTP endpoint (bare hosts default to https).
+# assets_s3_access_key: "your-assets-access-key"
+# assets_s3_secret_key: "your-assets-secret-key"
+# assets_s3_endpoint: "https://s3.us-east-1.amazonaws.com"
+# assets_s3_region: "us-east-1"
+
 # Optional: raises Hugging Face download rate limits during ingest.
 # hf_token: "hf_..."

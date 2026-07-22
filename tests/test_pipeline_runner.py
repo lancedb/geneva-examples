@@ -24,6 +24,10 @@ class _Table:
 
     def add_columns(self, mapping):
         self.calls["add"] = mapping
+        # Reflect the new column so wait_for_columns() sees it and returns.
+        for name in mapping:
+            if name not in self.schema.names:
+                self.schema.names.append(name)
 
     def backfill(self, column, **kw):
         self.calls["backfill"] = {"column": column, **kw}
@@ -49,7 +53,7 @@ class _Conn:
         return self._is_remote
 
 
-def _run(table, *, is_remote=True):
+def _run(table, *, is_remote=True, reset=True):
     sentinel_udf = object()
     return _runner.backfill_column(
         conn=_Conn(table, is_remote=is_remote),
@@ -64,6 +68,7 @@ def _run(table, *, is_remote=True):
         timeout_min=30,
         wait_attempts=3,
         wait_sleep_s=0,
+        reset=reset,
     ), sentinel_udf
 
 
@@ -112,3 +117,38 @@ def test_backfill_column_tolerates_missing_column_on_drop():
     assert "drop" not in table.calls
     assert "add" in table.calls
     assert "backfill" in table.calls
+
+
+def test_backfill_column_reset_skips_drop_when_column_absent():
+    # reset=True with no existing column: nothing to drop — the schema check
+    # short-circuits straight to add + backfill.
+    table = _Table(["video_id"])
+    _, sentinel_udf = _run(table)
+    assert "drop" not in table.calls
+    assert table.calls["add"] == {"embedding": sentinel_udf}
+    assert "backfill" in table.calls
+
+
+def test_backfill_column_incremental_keeps_existing_column():
+    # reset=False on an existing column is non-destructive: no drop, no re-add.
+    # The backfill fills only the null rows via the column's registered UDF — it
+    # must NOT pass udf= (unsupported for remote/enterprise backfill).
+    table = _Table(["video_id", "embedding"])
+    _run(table, reset=False)
+    assert "drop" not in table.calls
+    assert "add" not in table.calls
+    bf = table.calls["backfill"]
+    assert bf["column"] == "embedding"
+    assert "udf" not in bf
+    # where is left to backfill's default ('<col> IS NULL'), so it's not forced here.
+    assert "where" not in bf
+
+
+def test_backfill_column_incremental_adds_column_when_missing():
+    # First run (column absent): incremental still creates the column once (which
+    # binds the UDF), then backfills — no drop, and no udf= override on backfill.
+    table = _Table(["video_id"])
+    _, sentinel_udf = _run(table, reset=False)
+    assert "drop" not in table.calls
+    assert table.calls["add"] == {"embedding": sentinel_udf}
+    assert "udf" not in table.calls["backfill"]

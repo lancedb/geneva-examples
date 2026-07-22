@@ -2,8 +2,8 @@
 
 The YAML file is the single source of truth for the connection *mode*, secrets,
 and the connection target shared across the ingest and stage CLIs. See
-``config-example.yaml`` (plus ``config-example-local.yaml`` and
-``config-example-enterprise.yaml`` for the two mode-specific templates).
+``config-example-local.yaml`` / ``config-example-enterprise.yaml`` — the two
+mode-specific templates.
 
 Geneva powers **both** modes:
 
@@ -49,7 +49,16 @@ def _as_bool(value: object) -> bool:
 
 @dataclass
 class Config:
-    """Resolved configuration for the connection mode and S3-compatible storage."""
+    """Resolved configuration: connection mode + independent credential sets.
+
+    ``s3_*`` (no prefix) is the **storage bucket** — the connection's
+    ``storage_options``, i.e. the token that reads/writes the LanceDB data
+    files (``azure_account_*`` is its Azure equivalent; see
+    :meth:`storage_options`). ``assets_s3_*`` is the **assets bucket** — a
+    separate (typically bucket-scoped) token the external-refs video steps use
+    to enumerate and stream raw videos. The sets are deliberately independent:
+    none falls back to another.
+    """
 
     mode: str = DEFAULT_MODE
     lancedb_api_key: str | None = None
@@ -64,6 +73,10 @@ class Config:
     aws_allow_http: bool = False
     azure_account_name: str | None = None
     azure_account_key: str | None = None
+    assets_s3_access_key: str | None = None
+    assets_s3_secret_key: str | None = None
+    assets_s3_endpoint: str | None = None
+    assets_s3_region: str | None = None
     hf_token: str | None = None
 
     @property
@@ -170,5 +183,9 @@ def load_config(
         aws_allow_http=_as_bool(data.get("aws_allow_http")),
         azure_account_name=data.get("azure_account_name"),
         azure_account_key=data.get("azure_account_key"),
+        assets_s3_access_key=data.get("assets_s3_access_key"),
+        assets_s3_secret_key=data.get("assets_s3_secret_key"),
+        assets_s3_endpoint=data.get("assets_s3_endpoint"),
+        assets_s3_region=data.get("assets_s3_region"),
         hf_token=data.get("hf_token") or None,
     )
