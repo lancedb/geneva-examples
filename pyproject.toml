@@ -69,6 +69,7 @@ frame-openpose = "geneva_examples.examples.cli:frame_openpose"
 cleanup = "geneva_examples.ops.cleanup:app"
 stats = "geneva_examples.ops.stats:app"
 jobs = "geneva_examples.ops.jobs:app"
+debug = "geneva_examples.ops.debug:app"
 udf-studio = "geneva_examples.apps.udf_studio:app"
 
 [build-system]
@@ -188,6 +189,9 @@ omit = [
     "geneva_examples/ops/*",
     # The Textual TUI needs a live terminal app; its pure helpers are tested.
     "geneva_examples/tui/app.py",
+    # Same for the debug job monitor; its diagnosis logic lives in
+    # core/diagnose.py, which IS gated and unit-tested.
+    "geneva_examples/tui/debug_monitor.py",
     # Pure structural Protocols under TYPE_CHECKING: abstract `...` bodies that
     # never execute, so they only distort the line-coverage metric.
     "geneva_examples/core/_types.py",

@@ -337,6 +337,30 @@ uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if a
 skips any that are absent. Both CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
 
+### Debugging a job
+
+Where `jobs` shows the raw record, `debug` interprets it: it reads the
+`geneva_jobs` record and the `geneva_errors` store, samples throughput,
+applies bottleneck heuristics (workers below concurrency, stalled rate, long
+provisioning, stale heartbeat, skipped rows), and prints the exact commands
+for the driver-pod and Ray-worker logs.
+
+```bash
+uv run debug report <job_id>          # one-shot diagnosis + guided next steps
+uv run debug errors <job_id> --trace  # per-row failures with full tracebacks
+uv run debug logs                     # log-retrieval commands (driver pod, Ray workers)
+uv run debug watch <job_id>           # live TUI: metrics, throughput, events, findings
+```
+
+Every subcommand also takes `--replay demo_data/<file>.jsonl` to run against
+recorded job snapshots instead of a live cluster — try the two bundled
+scenarios before you have a failing job of your own:
+
+```bash
+uv run debug report --replay demo_data/debug_stuck_workers.jsonl
+uv run debug watch  --replay demo_data/debug_healthy_run.jsonl
+```
+
 ## UDF Studio
 
 A Gradio app for prototyping UDFs and chunkers before wiring them into a stage.
