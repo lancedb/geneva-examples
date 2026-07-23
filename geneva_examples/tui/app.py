@@ -67,6 +67,18 @@ _SYSTEM_TABLES = {
 }
 
 
+_DETAIL_PLACEHOLDER = "select a cell to see its full value"
+
+
+def _detail_text(value) -> str:
+    """The complete, untruncated rendering of one cell for the detail pane."""
+    if value is None:
+        return "(null)"
+    if isinstance(value, (bytes, bytearray)):
+        return f"<{len(value)} bytes>"
+    return str(value)
+
+
 def _open_any_table(conn, name: str, *, system: bool = False):
     """Open a regular table, or a geneva system table via its namespace."""
     if not system:
@@ -125,6 +137,8 @@ class GenevaTUI(App):
     #table-info { height: auto; padding: 0 0 1 0; color: $text-muted; }
     #table-filter { display: none; }
     #table-view { height: 1fr; }
+    #cell-detail { height: auto; max-height: 40%; border-top: solid $panel;
+                   padding: 0 1; }
     .field-label { color: $text-muted; }
     """
 
@@ -143,6 +157,10 @@ class GenevaTUI(App):
         self._tables_node = None
         self._current_table: str | None = None
         self._current_table_system = False
+        # Raw rows behind the grid: cells render truncated via format_cell,
+        # so the detail pane resolves full values from these by coordinate.
+        self._table_cols: list[str] = []
+        self._table_rows: list[dict] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -174,6 +192,8 @@ class GenevaTUI(App):
                             id="table-filter",
                         )
                         yield DataTable(id="table-view", zebra_stripes=True)
+                        with VerticalScroll(id="cell-detail"):
+                            yield Static(_DETAIL_PLACEHOLDER, id="cell-value")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -415,6 +435,8 @@ class GenevaTUI(App):
         info = self.query_one("#table-info", Static)
         grid = self.query_one("#table-view", DataTable)
         grid.clear(columns=True)
+        self._table_cols, self._table_rows = list(cols), list(rows)
+        self.query_one("#cell-value", Static).update(_DETAIL_PLACEHOLDER)
         if err:
             info.update(f"[red]{name}: {err}[/red]")
             return
@@ -428,6 +450,25 @@ class GenevaTUI(App):
             grid.add_columns(*cols)
         for row in rows:
             grid.add_row(*[format_cell(row.get(c)) for c in cols])
+
+    @on(DataTable.CellHighlighted, "#table-view")
+    def _on_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
+        """Show the highlighted cell's full value under the grid.
+
+        The grid renders truncated cells (tracebacks are bounded to one
+        line), so the pane resolves the raw value by cursor coordinate.
+        """
+        from rich.text import Text
+
+        row, col = event.coordinate
+        if not (0 <= row < len(self._table_rows) and 0 <= col < len(self._table_cols)):
+            return
+        column = self._table_cols[col]
+        value = self._table_rows[row].get(column)
+        # Text (not markup) so brackets in tracebacks render literally.
+        self.query_one("#cell-value", Static).update(
+            Text.assemble((column, "bold"), "\n", _detail_text(value))
+        )
 
     # --- running ----------------------------------------------------------
 

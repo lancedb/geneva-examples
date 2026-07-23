@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import asyncio
 
-from textual.widgets import Button, ContentSwitcher, DataTable, Input, Select, Tree
+from textual.widgets import (
+    Button,
+    ContentSwitcher,
+    DataTable,
+    Input,
+    Select,
+    Static,
+    Tree,
+)
 
 from geneva_examples.tui.app import GenevaTUI
 
@@ -88,6 +96,16 @@ def test_tui_table_viewer_populates_grid(monkeypatch):
             grid = app.query_one("#table-view", DataTable)
             assert len(grid.columns) == 2
             assert len(grid.rows) == 1
+
+            # highlighting a truncated cell reveals its full value below —
+            # the grid shows "[512 floats]" but the pane gets the real list
+            grid.focus()
+            grid.move_cursor(row=0, column=1)
+            await pilot.pause()
+            detail = str(app.query_one("#cell-value", Static)._content)
+            assert detail.startswith("embedding")
+            assert "[512 floats]" not in detail
+            assert "0.1, 0.1" in detail
 
     asyncio.run(scenario())
 

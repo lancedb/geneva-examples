@@ -368,7 +368,9 @@ uv run jobs show <job-id> # the raw job record, if you prefer the terminal
 
 The failures are deterministic (`--rows`, `--fail-every` control them), so you
 can predict from the error messages exactly which rows failed. The viewer
-shows up to 100 rows per table.
+shows up to 100 rows per table, newest first; grid cells are truncated to one
+line, and highlighting a cell shows its full value — the complete
+`error_trace` traceback, say — in a pane below the grid.
 
 ## UDF Studio
 
