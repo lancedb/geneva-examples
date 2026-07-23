@@ -56,7 +56,14 @@ _TABLE_ROW_LIMIT = 100
 
 # Geneva system tables worth browsing after a backfill: the job records and
 # the per-row error store. They live in the connection's system namespace.
-_SYSTEM_TABLES = ("geneva_jobs", "geneva_errors")
+# Each maps to (timestamp column, unique key column): the viewer scans just
+# that narrow pair, sorts newest-first, then fetches the top rows by key —
+# geneva 0.14 accepts but ignores order_by on these scans, so sorting
+# server-side isn't an option and a bare limit() would keep the oldest rows.
+_SYSTEM_TABLES = {
+    "geneva_jobs": ("launched_at", "job_id"),
+    "geneva_errors": ("timestamp", "error_id"),
+}
 
 
 def _open_any_table(conn, name: str, *, system: bool = False):
@@ -65,6 +72,39 @@ def _open_any_table(conn, name: str, *, system: bool = False):
         return conn.open_table(name)
     namespace = list(getattr(conn, "system_namespace", None) or [])
     return conn.open_table(name, namespace=namespace)
+
+
+def _fetch_newest_first(
+    table, cols: list[str], where: str | None, ts_col: str, key_col: str, limit: int
+) -> tuple[int, list[dict]]:
+    """The newest ``limit`` rows of a system table, newest first.
+
+    Two narrow passes through public query APIs: scan ``(ts, key)`` for every
+    matching row, pick the newest keys client-side, then fetch only those rows
+    in full. The key scan stays small even when the full rows carry fat
+    payloads like ``error_trace``.
+    """
+    narrow = table.search()
+    if where:
+        narrow = narrow.where(where)
+    index = narrow.select([ts_col, key_col]).to_list()
+    index.sort(key=lambda r: (r.get(ts_col) is not None, r.get(ts_col) or 0))
+    index.reverse()
+    newest = index[:limit]
+    if not newest:
+        return len(index), []
+
+    keys = ",".join("'{}'".format(str(r[key_col]).replace("'", "")) for r in newest)
+    rows = (
+        table.search()
+        .where(f"{key_col} IN ({keys})")
+        .select(cols)
+        .limit(limit)
+        .to_list()
+    )
+    order = {str(r[key_col]): i for i, r in enumerate(newest)}
+    rows.sort(key=lambda r: order.get(str(r.get(key_col)), len(order)))
+    return len(index), rows
 
 
 class GenevaTUI(App):
@@ -332,15 +372,27 @@ class GenevaTUI(App):
                 # job_id leads on geneva_jobs/geneva_errors — it's the key
                 # you filter and correlate on.
                 cols.insert(0, cols.pop(cols.index("job_id")))
-            total = table.count_rows(where) if where else table.count_rows()
-            query = table.search()
-            if where:
-                query = query.where(where)
-            rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
+            ts_col, key_col = (
+                _SYSTEM_TABLES.get(name, (None, None)) if system else (None, None)
+            )
+            if ts_col and ts_col in cols and key_col in cols:
+                total, rows = _fetch_newest_first(
+                    table, cols, where, ts_col, key_col, _TABLE_ROW_LIMIT
+                )
+            else:
+                ts_col = None
+                total = table.count_rows(where) if where else table.count_rows()
+                query = table.search()
+                if where:
+                    query = query.where(where)
+                rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             cols, rows, total, err = [], [], 0, f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._show_table, name, cols, rows, total, err, where)
+            ts_col = None
+        self.call_from_thread(
+            self._show_table, name, cols, rows, total, err, where, bool(ts_col)
+        )
 
     def _show_table(
         self,
@@ -350,6 +402,7 @@ class GenevaTUI(App):
         total: int,
         err: str | None,
         where: str | None = None,
+        newest_first: bool = False,
     ) -> None:
         info = self.query_one("#table-info", Static)
         grid = self.query_one("#table-view", DataTable)
@@ -358,9 +411,10 @@ class GenevaTUI(App):
             info.update(f"[red]{name}: {err}[/red]")
             return
         filtered = f" where {where}" if where else ""
+        order = " · newest first" if newest_first else ""
         info.update(
             f"[b]{name}[/b]{filtered} — {total} rows × {len(cols)} cols "
-            f"(showing {len(rows)})"
+            f"(showing {len(rows)}{order})"
         )
         if cols:
             grid.add_columns(*cols)
