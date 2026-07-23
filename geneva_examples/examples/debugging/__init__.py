@@ -23,9 +23,10 @@ DEMO_ERRORS = Step(
         "analyze them in the Tables viewer or with `uv run debug`."
     ),
     run=seed_errors.run,
+    default_mode="local",  # laptop-first demo; pass --mode enterprise to opt out
     params=(
         Param("table_name", str, "debug_demo", "Demo table to (over)write."),
-        Param("rows", int, 120, "Rows to seed (value == id).", min=1),
+        Param("rows", int, 40, "Rows to seed (value == id).", min=1),
         Param(
             "fail_every",
             int,

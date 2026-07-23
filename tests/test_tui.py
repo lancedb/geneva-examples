@@ -22,6 +22,8 @@ def test_tui_mounts_examples_and_tables_sections():
             tree = app.query_one("#nav", Tree)
             sections = [n.label.plain for n in tree.root.children]
             assert sections == ["Examples", "Tables"]  # two top-level sections
+            assert app.query_one("#mode", Select).value == "local"  # local default
+            assert not app.query_one("#table-filter", Input).display  # hidden
             examples_node = tree.root.children[0]
             # images, video, pdf, audio, debugging
             assert len(examples_node.children) == 5
@@ -110,7 +112,9 @@ def test_tui_run_refreshes_table_in_table_view():
         ran: list = []
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._load_table = lambda cfg, name, system=False: loaded.append(name)
+            app._load_table = lambda cfg, name, system=False, job_id=None: (
+                loaded.append(name)
+            )
             app._run_step = lambda step, argv: ran.append(step)
             # simulate viewing a table
             app.query_one("#main").current = "table-pane"
@@ -119,5 +123,46 @@ def test_tui_run_refreshes_table_in_table_view():
             await pilot.pause()
         assert loaded == ["pdfs"]  # refreshed the shown table
         assert ran == []  # did not run a step UDF
+
+    asyncio.run(scenario())
+
+
+def test_tui_system_table_filter_pushes_where(monkeypatch):
+    """The job_id filter reaches the query as a where() and shows in the info."""
+    from _fakes import FakeConn, FakeTable
+
+    from geneva_examples.tui import app as tui_app
+
+    errtable = FakeTable(names=["job_id", "error_type"])
+    conn = FakeConn(tables={"geneva_errors": errtable}, is_remote=False)
+    monkeypatch.setattr(tui_app, "connect", lambda _cfg: conn)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # quotes are stripped, not escaped — the predicate can't be broken
+            app._load_table(app._build_cfg(), "geneva_errors", True, " j-1'23 ")
+            for _ in range(50):
+                await pilot.pause(0.1)
+                if errtable.wheres:
+                    break
+            assert errtable.wheres == ["job_id = 'j-123'"]
+            info = str(app.query_one("#table-info").render())
+            assert "where job_id = 'j-123'" in info
+
+    asyncio.run(scenario())
+
+
+def test_tui_job_id_filter_only_reads_on_system_tables():
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one("#table-filter", Input).value = "  j-9  "
+            app._current_table_system = False
+            assert app._job_id_filter() is None  # plain tables: no filter
+            app._current_table_system = True
+            assert app._job_id_filter() == "j-9"
 
     asyncio.run(scenario())

@@ -1,15 +1,17 @@
-"""Error-demo step: run a faulty backfill, then hand over to the analyzers.
+"""Error-demo step: run a faulty backfill, then analyze it in the TUI.
 
 Seeds a small ``(id, value)`` table and backfills a ``score`` column with a
 UDF that deterministically fails on some rows (see ``faulty.py``). Because
 the UDF skips failures, the job finishes DONE while the failed rows land as
 NULLs in ``score`` and as records in the ``geneva_errors`` system table —
-real material for the table viewer (``uv run tui``) and the ``debug`` CLI.
+real material for the table viewer: ``uv run tui`` -> Tables ->
+``geneva_errors (system)``, then filter on the printed job id.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter
 
 from geneva_examples.core.backfill import backfill_column
 from geneva_examples.core.common import build_manifest, connect, runtime_session
@@ -39,7 +41,7 @@ def run(
     cfg: Config,
     *,
     table_name: str = "debug_demo",
-    rows: int = 120,
+    rows: int = 40,
     fail_every: int = 7,
     concurrency: int = 2,
     task_size: int = 32,
@@ -52,7 +54,6 @@ def run(
     """Seed ``table_name``, backfill the faulty ``score`` column, and report."""
     import geneva
 
-    from geneva_examples.core.diagnose import summarize_errors
     from geneva_examples.examples.debugging.faulty import (
         FAULTY_RUNTIME_PIP,
         build_faulty_score_udf,
@@ -97,30 +98,33 @@ def run(
             use_cpu_only_pool=True,
         )
 
-    # The job "succeeded" — now show the holes it left behind.
+    # The job "succeeded" — now show the holes it left behind. Scope the
+    # error-store read to this job: geneva_errors is append-only, so the demo
+    # table accumulates records across re-runs.
+    job_id = _latest_job_id(conn, table_name)
     nulls = table.count_rows("score IS NULL")
     try:
-        errors = table.get_errors()
+        errors = table.get_errors(job_id=job_id) if job_id else table.get_errors()
     except Exception as exc:  # noqa: BLE001 — error store is best-effort
         logger.warning("error store unavailable: %s", exc)
         errors = []
     logger.info("null_score %d error_records %d", nulls, len(errors))
-    for etype, count, message in summarize_errors(errors):
-        logger.info("  %s x%d — %s", etype, count, message)
+    by_type = Counter(
+        str(getattr(e, "error_type", None) or "UnknownError") for e in errors
+    )
+    for etype, count in by_type.most_common():
+        logger.info("  %s x%d", etype, count)
 
-    job_id = _latest_job_id(conn, table_name) or "<job-id>"
-    mode_flag = "" if cfg.is_local else " --mode enterprise"
+    shown_id = job_id or "<job-id>"
     logger.info(
-        "\nanalyze it:\n"
-        "  uv run tui%s            -> Tables -> geneva_errors (the table viewer;\n"
-        "                             also open %s to see the NULL score rows)\n"
-        "  uv run debug report %s%s\n"
-        "  uv run debug errors %s --trace%s\n",
-        "" if cfg.is_local else "  (set mode to enterprise)",
+        "\nanalyze it in the table viewer:\n"
+        "  uv run tui   -> Tables -> geneva_errors (system)\n"
+        "                 paste the job id into the job_id filter:\n"
+        "                 %s\n"
+        "                 (open %s too — the failed rows have NULL score)\n"
+        "  uv run jobs show %s   # the raw job record\n",
+        shown_id,
         table_name,
-        job_id,
-        mode_flag,
-        job_id,
-        mode_flag,
+        shown_id,
     )
     logger.info("demo_errors_ok")

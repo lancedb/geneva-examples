@@ -56,6 +56,9 @@ class Step:
     params: tuple[Param, ...] = ()
     gpu: bool = False  # UI hint: runs a model (CPU-only in local mode)
     requires: str = ""  # UI hint, e.g. "run the ingest step first"
+    # CLI default for --mode. None keeps the config-driven resolution; steps
+    # that should be laptop-first (e.g. demos) pin "local".
+    default_mode: str | None = None
 
 
 # Help text for parameters that recur across many steps. Per-step specs merge
@@ -235,7 +238,8 @@ def build_command(example: Example, step: Step) -> click.Command:
             click.Option(
                 ["--mode"],
                 type=click.Choice(VALID_MODES),
-                default=None,
+                default=step.default_mode,
+                show_default=bool(step.default_mode),
                 help="Connection mode: 'local' or 'enterprise'.",
             ),
             click.Option(

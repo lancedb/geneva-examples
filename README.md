@@ -337,62 +337,36 @@ uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if a
 skips any that are absent. Both CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
 
-### Debugging a job
+### Debugging demo: generate real errors, analyze them in the table viewer
 
-Where `jobs` shows the raw record, `debug` interprets it: it reads the
-`geneva_jobs` record and the `geneva_errors` store, samples throughput,
-applies bottleneck heuristics (workers below concurrency, stalled rate, long
-provisioning, stale heartbeat, skipped rows), and prints the exact commands
-for the driver-pod and Ray-worker logs.
-
-```bash
-uv run debug report <job_id>          # one-shot diagnosis + guided next steps
-uv run debug errors <job_id> --trace  # per-row failures with full tracebacks
-uv run debug logs                     # log-retrieval commands (driver pod, Ray workers)
-uv run debug watch <job_id>           # live TUI: metrics, throughput, events, findings
-```
-
-Unlike the other CLIs, `debug` defaults to `--mode local` (the on-disk
-database), so it works on a laptop with zero config; pass `--mode enterprise`
-to diagnose jobs on the cluster.
-
-Every subcommand also takes `--replay demo_data/<file>.jsonl` to run against
-recorded job snapshots instead of a live cluster — try the two bundled
-scenarios before you have a failing job of your own:
-
-```bash
-uv run debug report --replay demo_data/debug_stuck_workers.jsonl
-uv run debug watch  --replay demo_data/debug_healthy_run.jsonl
-```
-
-### Generate real errors to practice on
-
-`demo-errors` manufactures the debugging guide's sneakiest failure shape for
-real: it seeds a small `(id, value)` table, then backfills a `score` column
-with a UDF that deterministically fails on some rows (divisible-by-N raises
+`demo-errors` manufactures the sneakiest backfill failure shape for real: it
+seeds a small `(id, value)` table, then backfills a `score` column with a UDF
+that deterministically fails on some rows (divisible-by-N raises
 `ValueError`, ends-in-9 raises `TimeoutError`) under `skip_on_error`. The job
 finishes **DONE** — but the failed rows are NULL in `score` and recorded in
-the `geneva_errors` system table:
+the `geneva_errors` system table. Defaults are laptop-friendly: local mode,
+40 rows, 9 failures.
 
 ```bash
-uv run demo-errors --mode local     # ~30s: seeds, backfills, prints a summary
+uv run demo-errors        # ~30s: seeds, backfills, prints a summary + job id
 ```
 
-Then analyze the wreckage. The TUI's Tables view now lists the geneva system
-tables, so the error store is browsable next to your data:
+Then analyze the wreckage in the TUI, which defaults to local mode too. Its
+Tables view lists the geneva system tables next to your data, and when you
+select `geneva_jobs (system)` or `geneva_errors (system)` a **job_id filter**
+appears above the grid — paste the id the demo printed to isolate that run:
 
 ```bash
-uv run tui                          # Tables → geneva_errors (system) — one row
-                                    # per failure: type, message, traceback,
-                                    # row_address, attempt; open debug_demo to
-                                    # see the NULL holes it left in `score`
-uv run debug report <job-id>        # the guided diagnosis of the same job
-uv run debug errors <job-id> --trace
+uv run tui                # Tables → geneva_errors (system) — one row per
+                          # failure: type, message, traceback, row_address,
+                          # attempt; filter on the printed job id.
+                          # Open debug_demo to see the NULL holes in `score`.
+uv run jobs show <job-id> # the raw job record, if you prefer the terminal
 ```
 
 The failures are deterministic (`--rows`, `--fail-every` control them), so you
-can predict from the error messages exactly which rows failed — and practice
-the retry-only-the-failed-rows workflow the `errors` subcommand prints.
+can predict from the error messages exactly which rows failed. The viewer
+shows up to 100 rows per table.
 
 ## UDF Studio
 

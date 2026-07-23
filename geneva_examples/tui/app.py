@@ -52,7 +52,7 @@ _MODES = [
     ("enterprise", "enterprise"),
 ]
 _LEVELS = [(lvl, lvl) for lvl in ("INFO", "DEBUG", "WARNING", "ERROR")]
-_TABLE_ROW_LIMIT = 25
+_TABLE_ROW_LIMIT = 100
 
 # Geneva system tables worth browsing after a backfill: the job records and
 # the per-row error store. They live in the connection's system namespace.
@@ -82,6 +82,7 @@ class GenevaTUI(App):
     #form { height: 1fr; padding: 0 1; }
     #log { height: 40%; border-top: solid $panel; }
     #table-info { height: auto; padding: 0 0 1 0; color: $text-muted; }
+    #table-filter { display: none; }
     #table-view { height: 1fr; }
     .field-label { color: $text-muted; }
     """
@@ -108,7 +109,7 @@ class GenevaTUI(App):
             yield Tree("nav", id="nav")
             with Vertical(id="right"):
                 with Horizontal(id="controls"):
-                    yield Select(_MODES, value="auto", allow_blank=False, id="mode")
+                    yield Select(_MODES, value="local", allow_blank=False, id="mode")
                     yield Input(placeholder="config.yaml (optional)", id="config")
                     yield Input(placeholder="db_uri override (optional)", id="db_uri")
                     yield Select(
@@ -124,6 +125,13 @@ class GenevaTUI(App):
                         yield RichLog(id="log", highlight=True, markup=True, wrap=True)
                     with Vertical(id="table-pane"):
                         yield Static("Select a table on the left.", id="table-info")
+                        yield Input(
+                            placeholder=(
+                                "filter: job_id = …  (Enter to apply; "
+                                "blank shows all rows)"
+                            ),
+                            id="table-filter",
+                        )
                         yield DataTable(id="table-view", zebra_stripes=True)
         yield Footer()
 
@@ -177,8 +185,16 @@ class GenevaTUI(App):
             run_button.label = "Refresh ⟳"
             self._current_table = data[1]
             self._current_table_system = len(data) > 2 and bool(data[2])
+            # System tables (geneva_jobs / geneva_errors) carry a job_id
+            # column, so they get the job_id filter box; plain tables don't.
+            self.query_one("#table-filter", Input).display = self._current_table_system
             self.query_one("#table-info", Static).update(f"loading {data[1]}…")
-            self._load_table(self._build_cfg(), data[1], self._current_table_system)
+            self._load_table(
+                self._build_cfg(),
+                data[1],
+                self._current_table_system,
+                self._job_id_filter(),
+            )
 
     async def _select(self, example: Example, step: Step) -> None:
         self._current = (example, step)
@@ -238,6 +254,25 @@ class GenevaTUI(App):
     def action_refresh_tables(self) -> None:
         self._list_tables(self._build_cfg())
 
+    def _job_id_filter(self) -> str | None:
+        """The job_id filter value — only meaningful on system tables."""
+        if not self._current_table_system:
+            return None
+        return self.query_one("#table-filter", Input).value.strip() or None
+
+    @on(Input.Submitted, "#table-filter")
+    def _on_filter_submitted(self, _event: Input.Submitted) -> None:
+        if self._current_table and self._current_table_system:
+            self.query_one("#table-info", Static).update(
+                f"filtering {self._current_table}…"
+            )
+            self._load_table(
+                self._build_cfg(),
+                self._current_table,
+                True,
+                self._job_id_filter(),
+            )
+
     @work(thread=True, group="viewer", exclusive=True)
     def _list_tables(self, cfg) -> None:
         try:
@@ -278,17 +313,30 @@ class GenevaTUI(App):
         node.expand()
 
     @work(thread=True, group="viewer", exclusive=True)
-    def _load_table(self, cfg, name: str, system: bool = False) -> None:
+    def _load_table(
+        self,
+        cfg,
+        name: str,
+        system: bool = False,
+        job_id: str | None = None,
+    ) -> None:
+        # job_id values are hex/uuid strings; drop quotes rather than trying
+        # to escape them so the predicate below can't be broken open.
+        job_id = (job_id or "").strip().replace("'", "") or None
+        where = f"job_id = '{job_id}'" if job_id else None
         try:
             conn = connect(cfg)
             table = _open_any_table(conn, name, system=system)
             cols = list(table.schema.names)
-            total = table.count_rows()
-            rows = table.search().select(cols).limit(_TABLE_ROW_LIMIT).to_list()
+            total = table.count_rows(where) if where else table.count_rows()
+            query = table.search()
+            if where:
+                query = query.where(where)
+            rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             cols, rows, total, err = [], [], 0, f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._show_table, name, cols, rows, total, err)
+        self.call_from_thread(self._show_table, name, cols, rows, total, err, where)
 
     def _show_table(
         self,
@@ -297,6 +345,7 @@ class GenevaTUI(App):
         rows: list[dict],
         total: int,
         err: str | None,
+        where: str | None = None,
     ) -> None:
         info = self.query_one("#table-info", Static)
         grid = self.query_one("#table-view", DataTable)
@@ -304,8 +353,10 @@ class GenevaTUI(App):
         if err:
             info.update(f"[red]{name}: {err}[/red]")
             return
+        filtered = f" where {where}" if where else ""
         info.update(
-            f"[b]{name}[/b] — {total} rows × {len(cols)} cols (showing {len(rows)})"
+            f"[b]{name}[/b]{filtered} — {total} rows × {len(cols)} cols "
+            f"(showing {len(rows)})"
         )
         if cols:
             grid.add_columns(*cols)
@@ -349,6 +400,7 @@ class GenevaTUI(App):
                     self._build_cfg(),
                     self._current_table,
                     self._current_table_system,
+                    self._job_id_filter(),
                 )
             return
         if self._current is None:

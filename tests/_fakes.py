@@ -46,6 +46,7 @@ class FakeTable:
         self.backfilled: list[str] = []
         self.dropped: list[str] = []
         self.adds: list[Any] = []  # record batches appended via add()
+        self.wheres: list[str] = []  # filters applied via search().where()
 
     def add(self, data: Any) -> None:
         self.adds.append(data)
@@ -77,6 +78,10 @@ class FakeTable:
     def search(self, *_args: Any, **_kwargs: Any) -> FakeTable:
         return self
 
+    def where(self, expr: str, *_args: Any, **_kwargs: Any) -> FakeTable:
+        self.wheres.append(expr)
+        return self
+
     def select(self, *_args: Any, **_kwargs: Any) -> FakeTable:
         return self
 
@@ -106,7 +111,8 @@ class FakeConn:
         self.created: dict[str, FakeTable] = {}
         self.dropped: list[str] = []
 
-    def open_table(self, name: str) -> FakeTable:
+    def open_table(self, name: str, **_kwargs: Any) -> FakeTable:
+        # **_kwargs absorbs geneva extras like namespace= (system tables).
         if name in self._tables:
             return self._tables[name]
         if self._table is not None:
