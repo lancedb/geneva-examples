@@ -328,6 +328,10 @@ class GenevaTUI(App):
             conn = connect(cfg)
             table = _open_any_table(conn, name, system=system)
             cols = list(table.schema.names)
+            if system and "job_id" in cols:
+                # job_id leads on geneva_jobs/geneva_errors — it's the key
+                # you filter and correlate on.
+                cols.insert(0, cols.pop(cols.index("job_id")))
             total = table.count_rows(where) if where else table.count_rows()
             query = table.search()
             if where:

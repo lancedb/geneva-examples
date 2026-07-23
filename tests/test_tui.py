@@ -133,7 +133,7 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
 
     from geneva_examples.tui import app as tui_app
 
-    errtable = FakeTable(names=["job_id", "error_type"])
+    errtable = FakeTable(names=["error_type", "job_id", "error_message"])
     conn = FakeConn(tables={"geneva_errors": errtable}, is_remote=False)
     monkeypatch.setattr(tui_app, "connect", lambda _cfg: conn)
 
@@ -148,8 +148,13 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
                 if errtable.wheres:
                     break
             assert errtable.wheres == ["job_id = 'j-123'"]
+            await pilot.pause()
             info = str(app.query_one("#table-info").render())
             assert "where job_id = 'j-123'" in info
+            # job_id is promoted to the first column on system tables
+            grid = app.query_one("#table-view", DataTable)
+            labels = [str(c.label) for c in grid.columns.values()]
+            assert labels == ["job_id", "error_type", "error_message"]
 
     asyncio.run(scenario())
 
