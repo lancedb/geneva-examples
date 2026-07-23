@@ -27,8 +27,22 @@ from geneva_examples.core import diagnose as dx
 from geneva_examples.ops.jobs import (
     _elapsed,
     _fmt_dt,
-    _metrics_line,
     _open_connection,
+)
+
+# The progress counters worth a line in the report; live geneva jobs carry
+# dozens of internal timing counters that only `jobs show` should dump.
+_KEY_METRICS = (
+    "plan_fragments",
+    "workers",
+    "rows_checkpointed",
+    "rows_ready_for_commit",
+    "rows_committed",
+    "writer_fragments",
+    "partitions",
+    "batches",
+    "rows_produced",
+    "rows_skipped_on_error",
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +120,21 @@ def _load_replay(replay: Path) -> tuple[object, list, float | None]:
 # ---------------------------------------------------------------------------
 
 
+def _key_metrics_line(record: object) -> str:
+    """``name n/total`` for the key metrics, noting how many were elided."""
+    parts, elided = [], 0
+    for m in getattr(record, "metrics", None) or []:
+        name = getattr(m, "name", "?")
+        if name in _KEY_METRICS:
+            parts.append(f"{name} {getattr(m, 'n', '?')}/{getattr(m, 'total', '?')}")
+        else:
+            elided += 1
+    line = "  ".join(parts)
+    if line and elided:
+        line += f"  (+{elided} more: uv run jobs show <job-id>)"
+    return line
+
+
 def _echo_header(record: object, rate: float | None) -> None:
     status = dx.status_of(record)
     phase = dx.phase_of(getattr(record, "events", None))
@@ -129,7 +158,7 @@ def _echo_header(record: object, rate: float | None) -> None:
         f"launched:   {_fmt_dt(getattr(record, 'launched_at', None))} by "
         f"{getattr(record, 'launched_by', None) or '-'}   elapsed: {_elapsed(record)}"
     )
-    metrics = _metrics_line(record)
+    metrics = _key_metrics_line(record)
     if metrics:
         typer.echo(f"metrics:    {metrics}")
     if rate is not None:

@@ -104,7 +104,15 @@ def format_cell(value: Any) -> str:
         return f"[{n} items]" if n > 8 else repr(list(value))
     if isinstance(value, dict):
         return " ".join(f"{k}={v}" for k, v in value.items())
-    return str(value)
+    text = str(value)
+    # Multiline or very long values (e.g. geneva_errors tracebacks) get a
+    # single bounded line so the table grid stays readable.
+    first, _, rest = text.partition("\n")
+    if rest:
+        first = f"{first} …"
+    if len(first) > 120:
+        first = first[:119] + "…"
+    return first
 
 
 def memory_request_bytes(gib: float) -> int:

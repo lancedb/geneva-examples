@@ -102,6 +102,27 @@ def test_stage_cli_wires_backfill(
     assert set(table.backfilled) == expected
 
 
+def test_demo_errors_stage_seeds_and_wires_backfill(
+    monkeypatch: pytest.MonkeyPatch, fake_geneva: None
+) -> None:
+    from geneva_examples.examples.debugging import seed_errors as mod
+
+    table = FakeTable(names=["id", "value"])
+    conn = FakeConn(table=table, is_remote=False)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    _no_ray(mod, monkeypatch)
+
+    result = CliRunner().invoke(
+        cli.demo_errors,
+        ["--mode", "local", "--schema-wait-sleep-s", "0", "--rows", "12"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "debug_demo" in conn.created  # the demo table was seeded
+    assert set(table.added) == {"score"}  # faulty UDF bound to the column
+    assert table.backfilled == ["score"]  # backfill wired through
+
+
 def test_pdf_chunk_stage_wires_backfill(monkeypatch: pytest.MonkeyPatch) -> None:
     # The PDF step reuses the *real* geneva.udfs.document UDFs, so it can't use
     # the fake-geneva harness — drive it with real geneva but connection mocked.

@@ -70,6 +70,7 @@ cleanup = "geneva_examples.ops.cleanup:app"
 stats = "geneva_examples.ops.stats:app"
 jobs = "geneva_examples.ops.jobs:app"
 debug = "geneva_examples.ops.debug:app"
+demo-errors = "geneva_examples.examples.cli:demo_errors"
 udf-studio = "geneva_examples.apps.udf_studio:app"
 
 [build-system]
@@ -183,6 +184,9 @@ omit = [
     "geneva_examples/examples/audio/synthesize.py",
     "geneva_examples/examples/audio/transcribe.py",
     "geneva_examples/examples/audio/export.py",
+    # Error-demo step: opens a connection and runs a local backfill. Its
+    # faulty UDF factory (faulty.py) is pure and IS gate-covered.
+    "geneva_examples/examples/debugging/seed_errors.py",
     # Generated CLI bindings (thin build_command wrappers, exercised via smoke tests).
     "geneva_examples/examples/cli.py",
     # Ops CLIs: dominated by cluster/HTTP command bodies.

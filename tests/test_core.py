@@ -282,3 +282,11 @@ def test_wait_for_columns_times_out(monkeypatch):
         tables.wait_for_columns(
             conn=conn, table_name="t", required={"z"}, attempts=3, sleep_s=0
         )
+
+
+def test_format_cell_bounds_long_and_multiline_values():
+    assert common.format_cell("Traceback:\n  boom") == "Traceback: …"
+    out = common.format_cell("x" * 200)
+    assert len(out) == 120
+    assert out.endswith("…")
+    assert common.format_cell("short") == "short"

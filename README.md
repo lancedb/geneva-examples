@@ -365,6 +365,35 @@ uv run debug report --replay demo_data/debug_stuck_workers.jsonl
 uv run debug watch  --replay demo_data/debug_healthy_run.jsonl
 ```
 
+### Generate real errors to practice on
+
+`demo-errors` manufactures the debugging guide's sneakiest failure shape for
+real: it seeds a small `(id, value)` table, then backfills a `score` column
+with a UDF that deterministically fails on some rows (divisible-by-N raises
+`ValueError`, ends-in-9 raises `TimeoutError`) under `skip_on_error`. The job
+finishes **DONE** — but the failed rows are NULL in `score` and recorded in
+the `geneva_errors` system table:
+
+```bash
+uv run demo-errors --mode local     # ~30s: seeds, backfills, prints a summary
+```
+
+Then analyze the wreckage. The TUI's Tables view now lists the geneva system
+tables, so the error store is browsable next to your data:
+
+```bash
+uv run tui                          # Tables → geneva_errors (system) — one row
+                                    # per failure: type, message, traceback,
+                                    # row_address, attempt; open debug_demo to
+                                    # see the NULL holes it left in `score`
+uv run debug report <job-id>        # the guided diagnosis of the same job
+uv run debug errors <job-id> --trace
+```
+
+The failures are deterministic (`--rows`, `--fail-every` control them), so you
+can predict from the error messages exactly which rows failed — and practice
+the retry-only-the-failed-rows workflow the `errors` subcommand prints.
+
 ## UDF Studio
 
 A Gradio app for prototyping UDFs and chunkers before wiring them into a stage.

@@ -18,6 +18,7 @@ import pytest
 from geneva_examples.examples._shared import blip, clip
 from geneva_examples.examples.audio import transcribe as audio_transcribe
 from geneva_examples.examples.audio import tts as audio_tts
+from geneva_examples.examples.debugging import faulty
 from geneva_examples.examples.images import imageinfo
 from geneva_examples.examples.pdf import document as pdf_udfs
 from geneva_examples.examples.video import chunkers, chunkers_uri, openpose
@@ -283,3 +284,32 @@ def test_chunk_uri_video_udtf_handles_empty_uri(monkeypatch):
     _install_fake_video_s3(monkeypatch, {})
     udtf = chunkers_uri.chunk_uri_video_udtf(chunk_seconds=1.0, manifest=None)
     assert list(udtf.func("")) == []
+
+
+def test_faulty_score_udf_branches():
+    udf = faulty.build_faulty_score_udf(
+        input_column="value", fail_every=7, manifest=None
+    )
+    assert udf.func(3) == 4.5
+    with pytest.raises(ValueError, match="divisible by 7"):
+        udf.func(14)
+    with pytest.raises(TimeoutError, match="value=19"):
+        udf.func(19)
+    with pytest.raises(ValueError):  # divisible-by wins when both apply (49)
+        udf.func(49)
+    assert getattr(udf, "error_handling", None) is not None  # skip_on_error bound
+
+
+def test_faulty_score_udf_fail_every_zero_disables_corruption():
+    udf = faulty.build_faulty_score_udf(
+        input_column="value", fail_every=0, manifest=None
+    )
+    assert udf.func(14) == 21.0
+    with pytest.raises(TimeoutError):
+        udf.func(9)
+
+
+def test_faulty_score_udf_versions_are_unique():
+    a = faulty.build_faulty_score_udf(input_column="value", fail_every=7, manifest=None)
+    b = faulty.build_faulty_score_udf(input_column="value", fail_every=7, manifest=None)
+    assert a.version != b.version

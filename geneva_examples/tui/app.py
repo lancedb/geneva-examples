@@ -54,6 +54,18 @@ _MODES = [
 _LEVELS = [(lvl, lvl) for lvl in ("INFO", "DEBUG", "WARNING", "ERROR")]
 _TABLE_ROW_LIMIT = 25
 
+# Geneva system tables worth browsing after a backfill: the job records and
+# the per-row error store. They live in the connection's system namespace.
+_SYSTEM_TABLES = ("geneva_jobs", "geneva_errors")
+
+
+def _open_any_table(conn, name: str, *, system: bool = False):
+    """Open a regular table, or a geneva system table via its namespace."""
+    if not system:
+        return conn.open_table(name)
+    namespace = list(getattr(conn, "system_namespace", None) or [])
+    return conn.open_table(name, namespace=namespace)
+
 
 class GenevaTUI(App):
     """Interactive runner + table viewer for the geneva-examples pipelines."""
@@ -88,6 +100,7 @@ class GenevaTUI(App):
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._tables_node = None
         self._current_table: str | None = None
+        self._current_table_system = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -163,8 +176,9 @@ class GenevaTUI(App):
             switcher.current = "table-pane"
             run_button.label = "Refresh ⟳"
             self._current_table = data[1]
+            self._current_table_system = len(data) > 2 and bool(data[2])
             self.query_one("#table-info", Static).update(f"loading {data[1]}…")
-            self._load_table(self._build_cfg(), data[1])
+            self._load_table(self._build_cfg(), data[1], self._current_table_system)
 
     async def _select(self, example: Example, step: Step) -> None:
         self._current = (example, step)
@@ -229,12 +243,24 @@ class GenevaTUI(App):
         try:
             conn = connect(cfg)
             names = sorted(conn.table_names())
+            # Geneva's system tables (job records, per-row error store) live in
+            # a separate namespace, so table_names() never lists them — probe
+            # each so failed backfills can be analyzed right here.
+            system = []
+            for name in _SYSTEM_TABLES:
+                try:
+                    _open_any_table(conn, name, system=True)
+                    system.append(name)
+                except Exception:  # noqa: BLE001 - absent until first job
+                    pass
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the tree
-            names, err = [], f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._set_table_names, names, err)
+            names, system, err = [], [], f"{type(exc).__name__}: {exc}"
+        self.call_from_thread(self._set_table_names, names, system, err)
 
-    def _set_table_names(self, names: list[str], err: str | None) -> None:
+    def _set_table_names(
+        self, names: list[str], system: list[str], err: str | None
+    ) -> None:
         node = self._tables_node
         if node is None:
             return
@@ -242,18 +268,20 @@ class GenevaTUI(App):
         node.add_leaf("↻ refresh", data=("tables-refresh",))
         if err:
             node.add_leaf(f"⚠ {err[:48]}", data=None)
-        elif not names:
+        elif not names and not system:
             node.add_leaf("(no tables)", data=None)
         else:
             for name in names:
-                node.add_leaf(name, data=("table", name))
+                node.add_leaf(name, data=("table", name, False))
+            for name in system:
+                node.add_leaf(f"{name} (system)", data=("table", name, True))
         node.expand()
 
     @work(thread=True, group="viewer", exclusive=True)
-    def _load_table(self, cfg, name: str) -> None:
+    def _load_table(self, cfg, name: str, system: bool = False) -> None:
         try:
             conn = connect(cfg)
-            table = conn.open_table(name)
+            table = _open_any_table(conn, name, system=system)
             cols = list(table.schema.names)
             total = table.count_rows()
             rows = table.search().select(cols).limit(_TABLE_ROW_LIMIT).to_list()
@@ -317,7 +345,11 @@ class GenevaTUI(App):
                 self.query_one("#table-info", Static).update(
                     f"refreshing {self._current_table}…"
                 )
-                self._load_table(self._build_cfg(), self._current_table)
+                self._load_table(
+                    self._build_cfg(),
+                    self._current_table,
+                    self._current_table_system,
+                )
             return
         if self._current is None:
             return

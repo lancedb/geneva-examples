@@ -175,6 +175,11 @@ def install_fake_geneva(monkeypatch: Any) -> None:
 
     geneva_mod.udf = udf  # type: ignore[attr-defined]
 
+    def skip_on_error(**_kwargs: Any) -> list:
+        return []
+
+    geneva_mod.skip_on_error = skip_on_error  # type: ignore[attr-defined]
+
     manifest_mod = types.ModuleType("geneva.manifest")
     manifest_mod.GenevaManifest = FakeManifest  # type: ignore[attr-defined]
     geneva_mod.manifest = manifest_mod  # type: ignore[attr-defined]

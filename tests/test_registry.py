@@ -11,7 +11,13 @@ import geneva_examples.examples as reg
 
 
 def test_examples_present_in_order():
-    assert [e.name for e in reg.all_examples()] == ["images", "video", "pdf", "audio"]
+    assert [e.name for e in reg.all_examples()] == [
+        "images",
+        "video",
+        "pdf",
+        "audio",
+        "debugging",
+    ]
 
 
 def test_step_keys_unique_and_described():
