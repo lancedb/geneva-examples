@@ -9,7 +9,7 @@ the single source of truth in each example's package. Referenced by
 from __future__ import annotations
 
 from geneva_examples.core.spec import build_command
-from geneva_examples.examples import images, pdf, video
+from geneva_examples.examples import audio, images, pdf, video
 
 # --- images -----------------------------------------------------------------
 ingest_images = build_command(images.EXAMPLE, images.INGEST)
@@ -32,3 +32,9 @@ seed_video_clips = build_command(video.EXAMPLE, video.SEED)
 # --- pdf --------------------------------------------------------------------
 ingest_pdfs = build_command(pdf.EXAMPLE, pdf.INGEST)
 chunk_pdfs = build_command(pdf.EXAMPLE, pdf.CHUNK)
+
+# --- audio ------------------------------------------------------------------
+ingest_audio = build_command(audio.EXAMPLE, audio.INGEST)
+synthesize_audio = build_command(audio.EXAMPLE, audio.SYNTHESIZE)
+transcribe_audio = build_command(audio.EXAMPLE, audio.TRANSCRIBE)
+export_audio = build_command(audio.EXAMPLE, audio.EXPORT)

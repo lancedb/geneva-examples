@@ -23,7 +23,7 @@ def test_tui_mounts_examples_and_tables_sections():
             sections = [n.label.plain for n in tree.root.children]
             assert sections == ["Examples", "Tables"]  # two top-level sections
             examples_node = tree.root.children[0]
-            assert len(examples_node.children) == 3  # images, video, pdf
+            assert len(examples_node.children) == 4  # images, video, pdf, audio
 
             # first step auto-selected, description + form populated
             assert app._current is not None

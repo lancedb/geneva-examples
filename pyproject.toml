@@ -55,6 +55,10 @@ chunk-videos = "geneva_examples.examples.cli:chunk_videos"
 chunk-videos-openvid = "geneva_examples.examples.cli:chunk_videos_openvid"
 chunk-videos-external = "geneva_examples.examples.cli:chunk_videos_external"
 chunk-pdfs = "geneva_examples.examples.cli:chunk_pdfs"
+ingest-audio = "geneva_examples.examples.cli:ingest_audio"
+synthesize-audio = "geneva_examples.examples.cli:synthesize_audio"
+transcribe-audio = "geneva_examples.examples.cli:transcribe_audio"
+export-audio = "geneva_examples.examples.cli:export_audio"
 seed-video-clips = "geneva_examples.examples.cli:seed_video_clips"
 lightweight = "geneva_examples.examples.cli:lightweight"
 embed = "geneva_examples.examples.cli:embed"
@@ -173,6 +177,11 @@ omit = [
     "geneva_examples/examples/video/frame_embed.py",
     "geneva_examples/examples/video/frame_caption.py",
     "geneva_examples/examples/video/frame_openpose.py",
+    # Audio round-trip: TTS/transcribe backfill bodies need Ray + model weights;
+    # export opens a connection. Their factories/helpers ARE tested (test_audio.py).
+    "geneva_examples/examples/audio/synthesize.py",
+    "geneva_examples/examples/audio/transcribe.py",
+    "geneva_examples/examples/audio/export.py",
     # Generated CLI bindings (thin build_command wrappers, exercised via smoke tests).
     "geneva_examples/examples/cli.py",
     # Ops CLIs: dominated by cluster/HTTP command bodies.
@@ -189,6 +198,7 @@ omit = [
     # imageinfo.py is pure and fully tested -> kept in.
     "geneva_examples/examples/_shared/clip.py",
     "geneva_examples/examples/_shared/blip.py",
+    "geneva_examples/examples/audio/tts.py",
     "geneva_examples/examples/video/openpose.py",
     "geneva_examples/examples/video/chunkers.py",
     "geneva_examples/examples/video/chunkers_uri.py",
