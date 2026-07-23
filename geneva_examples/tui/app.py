@@ -182,6 +182,11 @@ class GenevaTUI(App):
         tree.show_root = False
         tree.root.expand()
 
+        # Tables lead the nav: after a run, inspecting data (and the geneva
+        # system tables) is the more frequent destination than re-running.
+        self._tables_node = tree.root.add("Tables", expand=True)
+        self._tables_node.add_leaf("↻ refresh", data=("tables-refresh",))
+
         examples = tree.root.add("Examples", expand=True)
         first: tuple[Example, Step] | None = None
         for ex in self._examples:
@@ -190,9 +195,6 @@ class GenevaTUI(App):
                 node.add_leaf(step.key, data=("step", ex, step))
                 if first is None:
                     first = (ex, step)
-
-        self._tables_node = tree.root.add("Tables", expand=True)
-        self._tables_node.add_leaf("↻ refresh", data=("tables-refresh",))
 
         if first is not None:
             await self._select(*first)

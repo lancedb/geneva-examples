@@ -21,10 +21,10 @@ def test_tui_mounts_examples_and_tables_sections():
             await pilot.pause()
             tree = app.query_one("#nav", Tree)
             sections = [n.label.plain for n in tree.root.children]
-            assert sections == ["Examples", "Tables"]  # two top-level sections
+            assert sections == ["Tables", "Examples"]  # tables lead the nav
             assert app.query_one("#mode", Select).value == "local"  # local default
             assert not app.query_one("#table-filter", Input).display  # hidden
-            examples_node = tree.root.children[0]
+            examples_node = tree.root.children[1]
             # images, video, pdf, audio, debugging
             assert len(examples_node.children) == 5
 
@@ -54,7 +54,7 @@ def test_tui_table_viewer_populates_grid():
             # listing tables adds a leaf per name under the Tables section
             app._set_table_names(["images", "pdfs"], ["geneva_errors"], None)
             await pilot.pause()
-            tables_node = app.query_one("#nav", Tree).root.children[1]
+            tables_node = app.query_one("#nav", Tree).root.children[0]
             labels = [n.label.plain for n in tables_node.children]
             assert "images" in labels and "pdfs" in labels
             assert "geneva_errors (system)" in labels  # error store is browsable
