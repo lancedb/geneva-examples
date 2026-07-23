@@ -147,10 +147,10 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
                 await pilot.pause(0.1)
                 if errtable.wheres:
                     break
-            assert errtable.wheres == ["job_id = 'j-123'"]
+            assert errtable.wheres == ["job_id LIKE '%j-123%'"]
             await pilot.pause()
             info = str(app.query_one("#table-info").render())
-            assert "where job_id = 'j-123'" in info
+            assert "where job_id LIKE '%j-123%'" in info
             assert "newest first" in info
             # job_id is promoted to the first column on system tables
             grid = app.query_one("#table-view", DataTable)

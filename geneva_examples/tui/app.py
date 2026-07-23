@@ -167,8 +167,8 @@ class GenevaTUI(App):
                         yield Static("Select a table on the left.", id="table-info")
                         yield Input(
                             placeholder=(
-                                "filter: job_id = …  (Enter to apply; "
-                                "blank shows all rows)"
+                                "filter: job_id contains …  (Enter to apply; "
+                                "a prefix works; blank shows all rows)"
                             ),
                             id="table-filter",
                         )
@@ -363,9 +363,10 @@ class GenevaTUI(App):
         job_id: str | None = None,
     ) -> None:
         # job_id values are hex/uuid strings; drop quotes rather than trying
-        # to escape them so the predicate below can't be broken open.
+        # to escape them so the predicate below can't be broken open. Partial
+        # ids match too — pasting the 8-char prefix from a log line is enough.
         job_id = (job_id or "").strip().replace("'", "") or None
-        where = f"job_id = '{job_id}'" if job_id else None
+        where = f"job_id LIKE '%{job_id}%'" if job_id else None
         try:
             conn = connect(cfg)
             table = _open_any_table(conn, name, system=system)

@@ -119,7 +119,7 @@ def run(
     logger.info(
         "\nanalyze it in the table viewer:\n"
         "  uv run tui   -> Tables -> geneva_errors (system)\n"
-        "                 paste the job id into the job_id filter:\n"
+        "                 paste the job id (a prefix works) into the filter:\n"
         "                 %s\n"
         "                 (open %s too — the failed rows have NULL score)\n"
         "  uv run jobs show %s   # the raw job record\n",
