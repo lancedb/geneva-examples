@@ -352,6 +352,10 @@ uv run debug logs                     # log-retrieval commands (driver pod, Ray 
 uv run debug watch <job_id>           # live TUI: metrics, throughput, events, findings
 ```
 
+Unlike the other CLIs, `debug` defaults to `--mode local` (the on-disk
+database), so it works on a laptop with zero config; pass `--mode enterprise`
+to diagnose jobs on the cluster.
+
 Every subcommand also takes `--replay demo_data/<file>.jsonl` to run against
 recorded job snapshots instead of a live cluster — try the two bundled
 scenarios before you have a failing job of your own:

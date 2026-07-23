@@ -103,6 +103,26 @@ def test_report_live_running_job(monkeypatch):
     assert "throughput" not in result.output  # sampling skipped
 
 
+def test_report_defaults_to_local_mode(monkeypatch):
+    seen = {}
+
+    def spy(config, db_uri, log_level, mode=None):
+        seen["mode"] = mode
+        record = _Job(job_id="j", table_name="t", column_name="c", status="DONE")
+        return None, _FakeConn(record, _FakeErrTable())
+
+    monkeypatch.setattr(debug, "_open_connection", spy)
+    result = runner.invoke(debug.app, ["report", "j", "--sample-secs", "0"])
+    assert result.exit_code == 0
+    assert seen["mode"] == "local"
+
+    result = runner.invoke(
+        debug.app, ["report", "j", "--sample-secs", "0", "--mode", "enterprise"]
+    )
+    assert result.exit_code == 0
+    assert seen["mode"] == "enterprise"
+
+
 def test_report_live_unknown_job(monkeypatch):
     _patch_conn(monkeypatch, _FakeConn(record=None))
     result = runner.invoke(debug.app, ["report", "nope", "--sample-secs", "0"])

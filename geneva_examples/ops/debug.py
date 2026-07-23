@@ -6,9 +6,11 @@ samples progress to estimate throughput, applies the bottleneck heuristics
 from the debugging guide, and prints the exact commands for the three log
 surfaces (client / driver pod / Ray workers).
 
-Works offline too: every subcommand accepts ``--replay demo_data/*.jsonl`` to
-run against recorded job snapshots instead of a live cluster — useful for
-demos and for learning the workflow before you have a failing job of your own.
+Laptop-first by default: connections use ``--mode local`` (the on-disk
+database) unless you pass ``--mode enterprise`` to inspect cluster jobs. And
+every subcommand accepts ``--replay demo_data/*.jsonl`` to run against
+recorded job snapshots with no database at all — useful for demos and for
+learning the workflow before you have a failing job of your own.
 """
 
 from __future__ import annotations
@@ -188,7 +190,9 @@ def _echo_log_commands(kube_context: str, namespace: str) -> None:
 
 _CONFIG_OPT = typer.Option(None, "--config", help="Path to config.yaml.")
 _MODE_OPT = typer.Option(
-    None, "--mode", help="Connection mode: 'local' or 'enterprise'."
+    "local",
+    "--mode",
+    help="Connection mode: 'local' (default) or 'enterprise'.",
 )
 _DB_URI_OPT = typer.Option(None, help="Override config db_uri.")
 _LOG_LEVEL_OPT = typer.Option("WARNING", help="Logging level (connection noise).")
