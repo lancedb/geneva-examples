@@ -9,12 +9,23 @@ from __future__ import annotations
 
 import asyncio
 
-from textual.widgets import DataTable, Input, Select, Tree
+from textual.widgets import Button, ContentSwitcher, DataTable, Input, Select, Tree
 
 from geneva_examples.tui.app import GenevaTUI
 
 
-def test_tui_mounts_examples_and_tables_sections():
+def _quiet_tables(monkeypatch) -> list:
+    """No-op the startup/manual tables refresh; returns the call log."""
+    calls: list = []
+    monkeypatch.setattr(
+        GenevaTUI, "_list_tables", lambda self, cfg=None: calls.append(cfg)
+    )
+    return calls
+
+
+def test_tui_mounts_examples_and_tables_sections(monkeypatch):
+    refreshes = _quiet_tables(monkeypatch)
+
     async def scenario() -> None:
         app = GenevaTUI()
         async with app.run_test() as pilot:
@@ -22,6 +33,10 @@ def test_tui_mounts_examples_and_tables_sections():
             tree = app.query_one("#nav", Tree)
             sections = [n.label.plain for n in tree.root.children]
             assert sections == ["Tables", "Examples"]  # tables lead the nav
+            # the app opens on the Tables view and refreshes the listing
+            assert app.query_one("#main", ContentSwitcher).current == "table-pane"
+            assert str(app.query_one("#run", Button).label) == "Refresh ⟳"
+            assert len(refreshes) == 1
             assert app.query_one("#mode", Select).value == "local"  # local default
             assert not app.query_one("#table-filter", Input).display  # hidden
             examples_node = tree.root.children[1]
@@ -43,8 +58,9 @@ def test_tui_mounts_examples_and_tables_sections():
     asyncio.run(scenario())
 
 
-def test_tui_table_viewer_populates_grid():
+def test_tui_table_viewer_populates_grid(monkeypatch):
     """The table viewer helpers fill the tree + data grid from fetched rows."""
+    _quiet_tables(monkeypatch)
 
     async def scenario() -> None:
         app = GenevaTUI()
@@ -76,8 +92,9 @@ def test_tui_table_viewer_populates_grid():
     asyncio.run(scenario())
 
 
-def test_tui_run_builds_argv_and_dispatches():
+def test_tui_run_builds_argv_and_dispatches(monkeypatch):
     """Pressing Run turns the form + global controls into the step CLI's argv."""
+    _quiet_tables(monkeypatch)
 
     async def scenario() -> None:
         app = GenevaTUI()
@@ -88,6 +105,8 @@ def test_tui_run_builds_argv_and_dispatches():
             await app._select(example, example.step("lightweight"))
             await pilot.pause()
 
+            # startup lands on the Tables view; running a step needs run-pane
+            app.query_one("#main", ContentSwitcher).current = "run-pane"
             app.query_one("#param-table-name", Input).value = "mytable"
             app.query_one("#mode", Select).value = "local"
             # Intercept dispatch so no subprocess/Ray runs.
@@ -103,8 +122,9 @@ def test_tui_run_builds_argv_and_dispatches():
     asyncio.run(scenario())
 
 
-def test_tui_run_refreshes_table_in_table_view():
+def test_tui_run_refreshes_table_in_table_view(monkeypatch):
     """In the Tables view the Run action re-loads the table, not a step's UDF."""
+    _quiet_tables(monkeypatch)
 
     async def scenario() -> None:
         app = GenevaTUI()
@@ -160,7 +180,9 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_tui_job_id_filter_only_reads_on_system_tables():
+def test_tui_job_id_filter_only_reads_on_system_tables(monkeypatch):
+    _quiet_tables(monkeypatch)
+
     async def scenario() -> None:
         app = GenevaTUI()
         async with app.run_test() as pilot:

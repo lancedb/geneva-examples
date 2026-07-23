@@ -351,8 +351,9 @@ the `geneva_errors` system table. Defaults are laptop-friendly: local mode,
 uv run demo-errors        # ~30s: seeds, backfills, prints a summary + job id
 ```
 
-Then analyze the wreckage in the TUI, which defaults to local mode too. Its
-Tables view lists the geneva system tables next to your data, and when you
+Then analyze the wreckage in the TUI, which defaults to local mode too and
+opens straight onto a freshly-listed Tables view. It lists the geneva system
+tables next to your data, and when you
 select `geneva_jobs (system)` or `geneva_errors (system)` a **job_id filter**
 appears above the grid — paste the id the demo printed (or just its first few
 characters; matching is partial) to isolate that run:

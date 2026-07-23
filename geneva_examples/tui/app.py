@@ -5,9 +5,10 @@ The left nav has two sections:
 * **Examples** — a tree of examples → steps (from the registry). Selecting a step
   shows its markdown description and a form built from its ``Param`` spec; **Run**
   launches the step's generated CLI in a subprocess and streams its output.
-* **Tables** — a read-only viewer. *Refresh* lists the tables in the connected
-  database (using the current mode/config controls); selecting one shows a
-  sample of its rows in a data grid.
+* **Tables** — a read-only viewer, and the view the app opens on (with a fresh
+  listing). *Refresh* lists the tables in the connected database (using the
+  current mode/config controls); selecting one shows a sample of its rows in a
+  data grid.
 
 Steps run as a subprocess (not an in-process thread) deliberately: Ray needs a
 real stdout file descriptor, which Textual's captured stdout doesn't provide.
@@ -155,8 +156,8 @@ class GenevaTUI(App):
                     yield Select(
                         _LEVELS, value="INFO", allow_blank=False, id="log_level"
                     )
-                    yield Button("Run ▶", variant="success", id="run")
-                with ContentSwitcher(initial="run-pane", id="main"):
+                    yield Button("Refresh ⟳", variant="success", id="run")
+                with ContentSwitcher(initial="table-pane", id="main"):
                     with Vertical(id="run-pane"):
                         yield Markdown(
                             "# geneva-examples\n\nSelect a step on the left.", id="desc"
@@ -197,7 +198,11 @@ class GenevaTUI(App):
                     first = (ex, step)
 
         if first is not None:
+            # Pre-populate the run pane so the first step-click is instant…
             await self._select(*first)
+        # …but land on the Tables view with a fresh listing: inspecting data
+        # is the primary entry point; the run pane is one step-click away.
+        self._list_tables(self._build_cfg())
 
     # --- selection --------------------------------------------------------
 
