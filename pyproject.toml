@@ -106,11 +106,11 @@ pylance = { index = "lance-format" }
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.6.0",
+    "pre-commit>=4.6.1",
     "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.18",
-    "ty>=0.0.50",
+    "ruff>=0.16.0",
+    "ty>=0.0.63",
 ]
 
 [tool.ruff]
