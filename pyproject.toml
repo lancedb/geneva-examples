@@ -69,6 +69,7 @@ frame-openpose = "geneva_examples.examples.cli:frame_openpose"
 cleanup = "geneva_examples.ops.cleanup:app"
 stats = "geneva_examples.ops.stats:app"
 jobs = "geneva_examples.ops.jobs:app"
+tables = "geneva_examples.ops.tables:app"
 demo-errors = "geneva_examples.examples.cli:demo_errors"
 udf-studio = "geneva_examples.apps.udf_studio:app"
 

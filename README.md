@@ -337,6 +337,30 @@ uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if a
 skips any that are absent. Both CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
 
+### Row-level viewing from the shell
+
+`tables` is the TUI table viewer as a pipeable CLI — same system-table
+support, partial `job_id` filtering, and newest-first ordering, backed by the
+same core logic. Like the demo tooling it defaults to `--mode local`:
+
+```bash
+uv run tables                                   # list tables (+ system tables) with row counts
+uv run tables show debug_demo                   # ASCII table; leading # column = row index
+uv run tables show geneva_errors --job-id c5dd  # newest-first, partial id filter
+uv run tables show debug_demo --where "score IS NULL"
+uv run tables show geneva_errors --select job_id --select error_type
+```
+
+Machine formats emit **full, untruncated values** (the summary line goes to
+stderr so stdout stays pure data), and `--cell` dumps one value by the row
+index shown in the ASCII output:
+
+```bash
+uv run tables show geneva_errors --format json | jq '.[].error_type'
+uv run tables show geneva_errors --format csv > errors.csv
+uv run tables show geneva_errors --cell 0 error_trace   # full traceback to stdout
+```
+
 ### Debugging demo: generate real errors, analyze them in the table viewer
 
 `demo-errors` manufactures the sneakiest backfill failure shape for real: it
