@@ -137,14 +137,16 @@ class GenevaTUI(App):
     #table-info { height: auto; padding: 0 0 1 0; color: $text-muted; }
     #table-filter { display: none; }
     #table-view { height: 1fr; }
-    #cell-detail { height: auto; max-height: 40%; border-top: solid $panel;
-                   padding: 0 1; }
+    #cell-detail { height: auto; min-height: 8; max-height: 60%;
+                   border-top: solid $panel; padding: 0 1; }
+    #cell-detail.expanded { min-height: 60%; max-height: 85%; }
     .field-label { color: $text-muted; }
     """
 
     BINDINGS: ClassVar = [
         ("r", "run", "Run / refresh"),
         ("t", "refresh_tables", "List tables"),
+        ("d", "toggle_detail", "Detail size"),
         ("q", "quit", "Quit"),
     ]
 
@@ -450,6 +452,10 @@ class GenevaTUI(App):
             grid.add_columns(*cols)
         for row in rows:
             grid.add_row(*[format_cell(row.get(c)) for c in cols])
+
+    def action_toggle_detail(self) -> None:
+        """Grow the cell-detail pane for reading long values (tracebacks)."""
+        self.query_one("#cell-detail", VerticalScroll).toggle_class("expanded")
 
     @on(DataTable.CellHighlighted, "#table-view")
     def _on_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
