@@ -107,6 +107,14 @@ def test_tui_table_viewer_populates_grid(monkeypatch):
             assert "[512 floats]" not in detail
             assert "0.1, 0.1" in detail
 
+            # "d" toggles the detail pane into expanded (trace-reading) size
+            pane = app.query_one("#cell-detail")
+            assert not pane.has_class("expanded")
+            await pilot.press("d")
+            assert pane.has_class("expanded")
+            await pilot.press("d")
+            assert not pane.has_class("expanded")
+
     asyncio.run(scenario())
 
 
