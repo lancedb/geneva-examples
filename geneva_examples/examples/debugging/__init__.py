@@ -3,8 +3,8 @@
 One step seeds a small table and backfills a deliberately faulty UDF with
 ``skip_on_error``: the job completes DONE while the failing rows are written
 as NULLs and recorded in the ``geneva_errors`` system table. That leaves real
-material to analyze in the TUI table viewer (``uv run tui`` -> Tables) and
-with the ``debug`` CLI (``report`` / ``errors --trace`` / ``watch``).
+material to analyze in the TUI table viewer (``uv run tui`` -> Tables ->
+``geneva_errors (system)``) or with ``uv run jobs show <job_id>``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ DEMO_ERRORS = Step(
         "a UDF that deterministically fails on some rows (divisible-by-N -> "
         "ValueError, ends-in-9 -> TimeoutError) under `skip_on_error`. The job "
         "finishes DONE with NULL holes and real `geneva_errors` records — then "
-        "analyze them in the Tables viewer or with `uv run debug`."
+        "analyze them in the Tables viewer or with `uv run jobs show <job_id>`."
     ),
     run=seed_errors.run,
     default_mode="local",  # laptop-first demo; pass --mode enterprise to opt out
