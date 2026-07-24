@@ -44,6 +44,16 @@ from textual.widgets import (
 from geneva_examples.core.common import connect, format_cell
 from geneva_examples.core.config import load_config
 from geneva_examples.core.spec import Example, Param, Step
+from geneva_examples.core.tables import (
+    DEFAULT_ROW_LIMIT,
+    SYSTEM_TABLES,
+    detail_text,
+    fetch_newest_first,
+    job_id_where,
+    lead_with_job_id,
+    open_any_table,
+    probe_system_tables,
+)
 from geneva_examples.examples import all_examples
 from geneva_examples.tui.forms import field_id, initial_text
 
@@ -53,71 +63,8 @@ _MODES = [
     ("enterprise", "enterprise"),
 ]
 _LEVELS = [(lvl, lvl) for lvl in ("INFO", "DEBUG", "WARNING", "ERROR")]
-_TABLE_ROW_LIMIT = 100
-
-# Geneva system tables worth browsing after a backfill: the job records and
-# the per-row error store. They live in the connection's system namespace.
-# Each maps to (timestamp column, unique key column): the viewer scans just
-# that narrow pair, sorts newest-first, then fetches the top rows by key —
-# geneva 0.14 accepts but ignores order_by on these scans, so sorting
-# server-side isn't an option and a bare limit() would keep the oldest rows.
-_SYSTEM_TABLES = {
-    "geneva_jobs": ("launched_at", "job_id"),
-    "geneva_errors": ("timestamp", "error_id"),
-}
-
 
 _DETAIL_PLACEHOLDER = "select a cell to see its full value"
-
-
-def _detail_text(value) -> str:
-    """The complete, untruncated rendering of one cell for the detail pane."""
-    if value is None:
-        return "(null)"
-    if isinstance(value, (bytes, bytearray)):
-        return f"<{len(value)} bytes>"
-    return str(value)
-
-
-def _open_any_table(conn, name: str, *, system: bool = False):
-    """Open a regular table, or a geneva system table via its namespace."""
-    if not system:
-        return conn.open_table(name)
-    namespace = list(getattr(conn, "system_namespace", None) or [])
-    return conn.open_table(name, namespace=namespace)
-
-
-def _fetch_newest_first(
-    table, cols: list[str], where: str | None, ts_col: str, key_col: str, limit: int
-) -> tuple[int, list[dict]]:
-    """The newest ``limit`` rows of a system table, newest first.
-
-    Two narrow passes through public query APIs: scan ``(ts, key)`` for every
-    matching row, pick the newest keys client-side, then fetch only those rows
-    in full. The key scan stays small even when the full rows carry fat
-    payloads like ``error_trace``.
-    """
-    narrow = table.search()
-    if where:
-        narrow = narrow.where(where)
-    index = narrow.select([ts_col, key_col]).to_list()
-    index.sort(key=lambda r: (r.get(ts_col) is not None, r.get(ts_col) or 0))
-    index.reverse()
-    newest = index[:limit]
-    if not newest:
-        return len(index), []
-
-    keys = ",".join("'{}'".format(str(r[key_col]).replace("'", "")) for r in newest)
-    rows = (
-        table.search()
-        .where(f"{key_col} IN ({keys})")
-        .select(cols)
-        .limit(limit)
-        .to_list()
-    )
-    order = {str(r[key_col]): i for i, r in enumerate(newest)}
-    rows.sort(key=lambda r: order.get(str(r.get(key_col)), len(order)))
-    return len(index), rows
 
 
 class GenevaTUI(App):
@@ -350,13 +297,7 @@ class GenevaTUI(App):
             # Geneva's system tables (job records, per-row error store) live in
             # a separate namespace, so table_names() never lists them — probe
             # each so failed backfills can be analyzed right here.
-            system = []
-            for name in _SYSTEM_TABLES:
-                try:
-                    _open_any_table(conn, name, system=True)
-                    system.append(name)
-                except Exception:  # noqa: BLE001 - absent until first job
-                    pass
+            system = probe_system_tables(conn)
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the tree
             names, system, err = [], [], f"{type(exc).__name__}: {exc}"
@@ -389,25 +330,19 @@ class GenevaTUI(App):
         system: bool = False,
         job_id: str | None = None,
     ) -> None:
-        # job_id values are hex/uuid strings; drop quotes rather than trying
-        # to escape them so the predicate below can't be broken open. Partial
-        # ids match too — pasting the 8-char prefix from a log line is enough.
-        job_id = (job_id or "").strip().replace("'", "") or None
-        where = f"job_id LIKE '%{job_id}%'" if job_id else None
+        where = job_id_where(job_id)
         try:
             conn = connect(cfg)
-            table = _open_any_table(conn, name, system=system)
+            table = open_any_table(conn, name, system=system)
             cols = list(table.schema.names)
-            if system and "job_id" in cols:
-                # job_id leads on geneva_jobs/geneva_errors — it's the key
-                # you filter and correlate on.
-                cols.insert(0, cols.pop(cols.index("job_id")))
+            if system:
+                cols = lead_with_job_id(cols)
             ts_col, key_col = (
-                _SYSTEM_TABLES.get(name, (None, None)) if system else (None, None)
+                SYSTEM_TABLES.get(name, (None, None)) if system else (None, None)
             )
             if ts_col and ts_col in cols and key_col in cols:
-                total, rows = _fetch_newest_first(
-                    table, cols, where, ts_col, key_col, _TABLE_ROW_LIMIT
+                total, rows = fetch_newest_first(
+                    table, cols, where, ts_col, key_col, DEFAULT_ROW_LIMIT
                 )
             else:
                 ts_col = None
@@ -415,7 +350,7 @@ class GenevaTUI(App):
                 query = table.search()
                 if where:
                     query = query.where(where)
-                rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
+                rows = query.select(cols).limit(DEFAULT_ROW_LIMIT).to_list()
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             cols, rows, total, err = [], [], 0, f"{type(exc).__name__}: {exc}"
@@ -473,7 +408,7 @@ class GenevaTUI(App):
         value = self._table_rows[row].get(column)
         # Text (not markup) so brackets in tracebacks render literally.
         self.query_one("#cell-value", Static).update(
-            Text.assemble((column, "bold"), "\n", _detail_text(value))
+            Text.assemble((column, "bold"), "\n", detail_text(value))
         )
 
     # --- running ----------------------------------------------------------
