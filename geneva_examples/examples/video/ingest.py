@@ -18,10 +18,6 @@ logger = logging.getLogger(__name__)
 # (video_id, url) pairs ingested by default.
 VIDEOS: list[tuple[str, str]] = [
     (
-        "big-buck-bunny",
-        "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v",
-    ),
-    (
         "sintel",
         "https://archive.org/download/Sintel/sintel-2048-stereo.mp4",
     ),
