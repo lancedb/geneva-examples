@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 
-from geneva_examples.core.common import connect, format_sample
+from geneva_examples.core.common import connect, create_table, format_sample
 from geneva_examples.core.config import Config
 from geneva_examples.core.utils.retry import retry_io
 
@@ -94,7 +94,7 @@ def run(
         if table is None:
             table = retry_io(
                 "create_table",
-                lambda b=norm: conn.create_table(table_name, data=b),
+                lambda b=norm: create_table(conn, table_name, b),
                 attempts=table_write_retries,
                 sleep_s=table_write_retry_sleep_s,
             )

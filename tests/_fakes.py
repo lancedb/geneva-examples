@@ -39,9 +39,18 @@ class Schema:
 class FakeTable:
     """Records the backfill wiring calls; supports the read chains the CLIs use."""
 
-    def __init__(self, names: list[str] | None = None, rows: int = 0) -> None:
+    def __init__(
+        self,
+        names: list[str] | None = None,
+        rows: int = 0,
+        *,
+        stable_row_ids: bool = True,
+    ) -> None:
         self.schema = Schema(names or [])
         self._rows = rows
+        # Sources created through common.create_table() always have stable row
+        # IDs; set False to drive the chunker examples' source guard.
+        self.stable_row_ids = stable_row_ids
         self.added: dict[str, Any] = {}
         self.backfilled: list[str] = []
         self.dropped: list[str] = []
@@ -70,6 +79,12 @@ class FakeTable:
 
     def checkout_latest(self) -> None:
         pass
+
+    def to_lance(self) -> Any:
+        """Lance dataset handle. Only ``has_stable_row_ids`` is read from it (by
+        the chunker examples' source guard), so a namespace stands in.
+        """
+        return types.SimpleNamespace(has_stable_row_ids=self.stable_row_ids)
 
     def count_rows(self, _filter: str | None = None) -> int:
         return self._rows

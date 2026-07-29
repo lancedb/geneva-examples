@@ -44,6 +44,35 @@ def test_chunk_cli_creates_and_refreshes_view(
     assert "video_clips" in conn.created
 
 
+@pytest.mark.parametrize(
+    "cli_attr,module_path",
+    [
+        ("chunk_videos", "geneva_examples.examples.video.chunk"),
+        ("chunk_videos_openvid", "geneva_examples.examples.video.chunk_openvid"),
+    ],
+)
+def test_chunk_cli_refuses_source_without_stable_row_ids(
+    monkeypatch: pytest.MonkeyPatch, cli_attr: str, module_path: str
+) -> None:
+    """A chunker MV over a source without stable row IDs is unrefreshable the
+    moment the source version moves, and the maintenance agent moves it on its
+    own. Refuse at view creation, naming the source, instead of leaving a view
+    that fails later inside the indexing subsystem.
+    """
+    mod = importlib.import_module(module_path)
+    table = FakeTable(names=["video_id"], stable_row_ids=False)
+    conn = FakeConn(table=table, is_remote=False)
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    monkeypatch.setattr(mod, "runtime_session", lambda *_a, **_k: nullcontext())
+
+    result = CliRunner().invoke(getattr(cli, cli_attr), ["--mode", "local"])
+
+    assert result.exit_code != 0
+    assert "stable row IDs" in str(result.exception)
+    assert "videos" in str(result.exception)  # names the source table
+    assert "video_clips" not in conn.created  # no half-built view left behind
+
+
 # The worker-env transport keys the chunk CLI writes for the local UDF.
 _ASSETS_ENV_KEYS = (
     "ASSETS_S3_ENDPOINT",

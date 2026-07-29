@@ -38,6 +38,7 @@ import uuid
 from geneva_examples.core.backfill import backfill_column
 from geneva_examples.core.common import (
     connect,
+    create_table,
     format_sample,
     resolve_resources,
     runtime_session,
@@ -332,7 +333,7 @@ def run(
         pass
     retry_io(
         "create_skeleton",
-        lambda: conn.create_table(clips_table, data=skeleton),
+        lambda: create_table(conn, clips_table, skeleton),
         attempts=table_write_retries,
         sleep_s=table_write_retry_sleep_s,
     )

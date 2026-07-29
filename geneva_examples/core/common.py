@@ -156,6 +156,62 @@ def connect(config: Config):
     )
 
 
+# Lance write option that makes row IDs survive compaction/update/delete. A
+# chunker materialized view can only refresh across source versions when its
+# SOURCE table has these; without them the view is orphaned the first time the
+# source moves -- including by the maintenance agent's own compaction.
+OPT_STABLE_ROW_IDS = "new_table_enable_stable_row_ids"
+
+
+def create_table(conn, name: str, data, **kwargs):
+    """Create a table with stable row IDs enabled.
+
+    Every table here is a potential chunker/UDTF materialized-view source, and
+    stable row IDs cannot be turned on afterwards -- there is no migration, only a
+    full rewrite. So they are enabled at creation, unconditionally.
+
+    Enterprise mode logs "storage_options parameter is not supported when creating
+    tables on remote connections, ignoring" here. That warning is wrong -- geneva
+    forwards the options to the ``LanceNamespaceDBConnection`` regardless, which
+    honours the per-request option and performs the Lance write client-side after
+    asking phalanx for the table location. Verified against geneva 0.14.1b2, the
+    version deployed on the PoC stack.
+    """
+    return conn.create_table(
+        name, data=data, storage_options={OPT_STABLE_ROW_IDS: "true"}, **kwargs
+    )
+
+
+def require_stable_row_ids(table, table_name: str) -> None:
+    """Refuse to build a chunker materialized view over an unsuitable source.
+
+    A chunker MV records the source version it was built against in
+    ``geneva::view::base_table_version`` and never advances it, so the first time
+    the source moves the view becomes permanently unrefreshable unless the source
+    has stable row IDs. The source moving is not a user action: the maintenance
+    agent compacts any table past 30 uncompacted fragments on its own, which
+    commits a new version.
+
+    So a source without stable row IDs yields a view that works once and then dies
+    somewhere else entirely, hours later, in the indexing subsystem. Fail here
+    instead, naming the table -- there is no retrofit for stable row IDs
+    (write-time only, no migration), so the table has to be recreated.
+    """
+    from geneva.db import dataset_uses_stable_row_ids
+
+    # to_lance() re-reads the manifest; a cached handle can predate our own write.
+    if dataset_uses_stable_row_ids(table.to_lance()):
+        return
+
+    raise RuntimeError(
+        f"source table {table_name!r} does not have stable row IDs, so a chunker "
+        "materialized view over it cannot be refreshed once the source version "
+        "moves -- which the maintenance agent's compaction does unprompted. "
+        f"Drop {table_name!r} and re-ingest; this example now creates sources with "
+        f"{OPT_STABLE_ROW_IDS}=true."
+    )
+
+
 def runtime_session(conn: object, config: Config) -> AbstractContextManager:
     """Context wrapping a run's backfills.
 
