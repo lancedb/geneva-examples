@@ -88,9 +88,13 @@ def backfill_column(
     if is_remote:
         backfill_kwargs.update(
             checkpoint_size=checkpoint_size,
-            # Pins appliers to the cluster's CPU-only node pool via a custom Ray
-            # resource that only the remote cluster advertises — requesting it on
-            # local Ray would leave the tasks unschedulable.
+            # Keeps appliers that request NO GPU off the GPU nodes, via a custom
+            # Ray resource only the cluster's CPU-only node groups advertise.
+            # It never holds a GPU workload back: geneva branches on the UDF's
+            # num_gpus first and only consults this flag when that is zero, so a
+            # GPU UDF is scheduled on GPUs either way. Remote-only because local
+            # Ray advertises no such resource — asking for it would leave the
+            # tasks unschedulable.
             use_cpu_only_pool=use_cpu_only_pool,
         )
     else:
