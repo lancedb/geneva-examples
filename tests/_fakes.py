@@ -48,8 +48,8 @@ class FakeTable:
     ) -> None:
         self.schema = Schema(names or [])
         self._rows = rows
-        # Sources created through common.create_table() always have stable row
-        # IDs; set False to drive the chunker examples' source guard.
+        # The ingest examples create sources with stable row IDs; set False to
+        # drive the chunker examples' source guard.
         self.stable_row_ids = stable_row_ids
         self.added: dict[str, Any] = {}
         self.backfilled: list[str] = []
@@ -124,6 +124,9 @@ class FakeConn:
         self._tables = tables or {}
         self._is_remote = is_remote
         self.created: dict[str, FakeTable] = {}
+        # Per-table create_table kwargs, so tests can assert the write options
+        # (stable row IDs) the examples pass to geneva.
+        self.create_kwargs: dict[str, dict[str, Any]] = {}
         self.dropped: list[str] = []
 
     def open_table(self, name: str, **_kwargs: Any) -> FakeTable:
@@ -134,10 +137,11 @@ class FakeConn:
             return self._table
         raise RuntimeError(f"table not found: {name}")
 
-    def create_table(self, name: str, data: Any = None, **_kwargs: Any) -> FakeTable:
+    def create_table(self, name: str, data: Any = None, **kwargs: Any) -> FakeTable:
         table = self._table if self._table is not None else FakeTable()
         self._tables.setdefault(name, table)
         self.created[name] = table
+        self.create_kwargs[name] = kwargs
         return table
 
     def drop_table(self, name: str) -> None:

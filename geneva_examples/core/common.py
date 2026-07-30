@@ -156,30 +156,23 @@ def connect(config: Config):
     )
 
 
-# Lance write option that makes row IDs survive compaction/update/delete. A
-# chunker materialized view can only refresh across source versions when its
+# Lance write option that makes row IDs survive compaction/update/delete. Every
+# table an example creates passes it to ``conn.create_table``:
+#
+#     conn.create_table(name, data=..., storage_options={OPT_STABLE_ROW_IDS: "true"})
+#
+# A chunker materialized view can only refresh across source versions when its
 # SOURCE table has these; without them the view is orphaned the first time the
-# source moves -- including by the maintenance agent's own compaction.
+# source moves -- including by the maintenance agent's own compaction. They are
+# write-time only (no migration, only a full rewrite), and any table here can
+# later become a chunker/UDTF view source, so they go on unconditionally.
+#
+# Enterprise mode logs "storage_options parameter is not supported when creating
+# tables on remote connections, ignoring" -- a false alarm. ``Connection`` forwards
+# the options to the ``LanceNamespaceDBConnection`` anyway (geneva 0.14.0 db.py),
+# which honours them in the client-side Lance write it performs after asking
+# phalanx for the table location.
 OPT_STABLE_ROW_IDS = "new_table_enable_stable_row_ids"
-
-
-def create_table(conn, name: str, data, **kwargs):
-    """Create a table with stable row IDs enabled.
-
-    Every table here is a potential chunker/UDTF materialized-view source, and
-    stable row IDs cannot be turned on afterwards -- there is no migration, only a
-    full rewrite. So they are enabled at creation, unconditionally.
-
-    Enterprise mode logs "storage_options parameter is not supported when creating
-    tables on remote connections, ignoring" here. That warning is wrong -- geneva
-    forwards the options to the ``LanceNamespaceDBConnection`` regardless, which
-    honours the per-request option and performs the Lance write client-side after
-    asking phalanx for the table location. Verified against geneva 0.14.1b2, the
-    version deployed on the PoC stack.
-    """
-    return conn.create_table(
-        name, data=data, storage_options={OPT_STABLE_ROW_IDS: "true"}, **kwargs
-    )
 
 
 def require_stable_row_ids(table, table_name: str) -> None:

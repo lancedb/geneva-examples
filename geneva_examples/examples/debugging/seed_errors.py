@@ -15,9 +15,9 @@ from collections import Counter
 
 from geneva_examples.core.backfill import backfill_column
 from geneva_examples.core.common import (
+    OPT_STABLE_ROW_IDS,
     build_manifest,
     connect,
-    create_table,
     runtime_session,
 )
 from geneva_examples.core.config import Config
@@ -78,7 +78,12 @@ def run(
     # Fresh, deterministic input: value == id, so you can predict from the
     # error message exactly which rows will fail.
     data = [{"id": i, "value": i} for i in range(1, rows + 1)]
-    table = create_table(conn, table_name, data, mode="overwrite")
+    table = conn.create_table(
+        table_name,
+        data=data,
+        mode="overwrite",
+        storage_options={OPT_STABLE_ROW_IDS: "true"},
+    )
     logger.info("seeded %d rows into %s", rows, table_name)
 
     manifest = build_manifest(cfg, "debug-demo", FAULTY_RUNTIME_PIP)

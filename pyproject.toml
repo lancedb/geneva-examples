@@ -8,35 +8,17 @@ dependencies = [
     "pyyaml>=6.0",
     # Pin the LanceDB stack to the versions the deployed cluster was built
     # against (client/server must match or declare_table/backfill_column 500s).
-    # Older pylance (8.x)/lancedb (0.33) spoke a different namespace API, so
-    # add_columns would succeed but backfill_column returned "column not found".
-    #
-    # LOCAL DEPLOYMENT PINS -- NOT FOR UPSTREAM. These are read off the DEPLOYED
-    # geneva-driver image, because that venv IS the server-side geneva stack this
-    # client talks to:
-    #   image geneva_driver_release-2026-07-20.5e797b35a7.arm64
-    #   /geneva_driver/.venv -> geneva 0.14.1b2, lancedb 0.34.0b4,
-    #                           pylance 9.0.0b21, pyarrow 23.0.1, numpy 1.26.4,
-    #                           lance-namespace 0.8.6, ray 2.54.0, python 3.12
-    #
-    # They deliberately differ from upstream (geneva 0.14.0 / lancedb 0.34.0b5 /
-    # pylance >=9.0.0b15), which tracks a newer data plane than this cluster's
-    # pinned July release -- upstream's lancedb 0.34.0b5 is AHEAD of the driver.
-    # Re-read from the image after any cluster release bump; do NOT take the
-    # newest beta on the index (0.14.1b7 / 9.0.0b24 exist and would be skew).
-    #
-    # pyarrow/numpy are pinned for the same reason: they are the Lance stack's
-    # array/IPC layer, and left unpinned uv resolved them well ahead of the
-    # cluster (pyarrow 24.0.0 vs 23.0.1, numpy 2.5.1 vs 1.26.4 -- an ABI split).
-    #
-    # geneva 0.14.1b2 is Gemfury-only (public PyPI stops at the 0.14.0 final),
-    # hence the geneva entry in [tool.uv.sources]. Both fury indexes are
-    # public-read, so no token is needed.
-    "geneva==0.14.1b2",
-    "lancedb==0.34.0b4",
-    "pylance==9.0.0b21",
-    "pyarrow==23.0.1",
-    "numpy==1.26.4",
+    # pylance 9.x betas live on the lance-format index (see [tool.uv.sources]).
+    # pyarrow/numpy are left to geneva's own constraints. geneva 0.14.0 (final,
+    # from public PyPI) requires python <3.14 — hence the requires-python upper
+    # bound above. Older pylance (8.x)/lancedb (0.33) spoke a different
+    # namespace API, so add_columns would succeed but backfill_column returned
+    # "column not found".
+    "geneva==0.14.0",
+    "lancedb==0.34.0b5",
+    "pylance>=9.0.0b15",
+    "pyarrow",
+    "numpy",
     "pillow>=10",
     "torch>=2.2",
     "open-clip-torch>=2.24",
@@ -104,10 +86,9 @@ prerelease = "allow"
 
 # Two Gemfury indexes, both `explicit` so only the packages pinned in
 # [tool.uv.sources] resolve from them; everything else stays on PyPI:
-#   - lancedb       → lancedb + geneva betas. The lancedb repo now carries
-#                     geneva 0.14.0b0 and 0.14.1b0..b7, so the 0.14.1b2 the
-#                     deployed cluster runs is only reachable here — public PyPI
-#                     stops at the 0.14.0 final.
+#   - lancedb       → lancedb (beta). NOTE: geneva's *final* 0.14.0 ships on
+#                     public PyPI, not Gemfury (only 0.14.0b0 lives here), so
+#                     geneva is intentionally NOT pinned to this index.
 #   - lance-format  → pylance (7.x+ betas live here, not on the lancedb repo)
 [[tool.uv.index]]
 name = "lancedb"
@@ -120,7 +101,6 @@ url = "https://pypi.fury.io/lance-format/"
 explicit = true
 
 [tool.uv.sources]
-geneva = { index = "lancedb" }
 lancedb = { index = "lancedb" }
 pylance = { index = "lance-format" }
 
