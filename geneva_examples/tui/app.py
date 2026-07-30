@@ -1,20 +1,24 @@
-"""Textual TUI: browse/run example pipelines and view database tables.
+"""Textual TUI: browse/run example pipelines, view database tables, inspect jobs.
 
-The left nav has two sections:
+The left nav has three sections:
 
-* **Examples** — a tree of examples → steps (from the registry). Selecting a step
-  shows its markdown description and a form built from its ``Param`` spec; **Run**
-  launches the step's generated CLI in a subprocess and streams its output.
 * **Tables** — a read-only viewer, and the view the app opens on (with a fresh
   listing). *Refresh* lists the tables in the connected database (using the
   current mode/config controls); selecting one shows a sample of its rows in a
   data grid.
+* **Jobs** — the same job records the ``jobs`` CLI reads (geneva has no
+  streaming log API, so the record's append-only event list *is* the log).
+  *Refresh* lists recent jobs newest-first across every status; selecting one
+  shows its full record, and ``f`` follows a running job by re-reading it.
+* **Examples** — a tree of examples → steps (from the registry). Selecting a step
+  shows its markdown description and a form built from its ``Param`` spec; **Run**
+  launches the step's generated CLI in a subprocess and streams its output.
 
 Steps run as a subprocess (not an in-process thread) deliberately: Ray needs a
 real stdout file descriptor, which Textual's captured stdout doesn't provide.
 Output is streamed via a thread-safe queue drained by a UI timer, so the reader
-thread never blocks the event loop. Table reads (a plain Lance scan, no Ray) run
-in a worker thread and post a single update back.
+thread never blocks the event loop. Table and job reads (a plain Lance scan or a
+history lookup, no Ray) run in a worker thread and post a single update back.
 """
 
 from __future__ import annotations
@@ -43,17 +47,32 @@ from textual.widgets import (
 
 from geneva_examples.core.common import connect, format_cell
 from geneva_examples.core.config import load_config
+from geneva_examples.core.jobs import (
+    ALL_STATUSES,
+    TERMINAL_STATUSES,
+    elapsed,
+    format_detail,
+    job_status,
+    job_target,
+    progress_summary,
+    sort_newest_first,
+    status_counts,
+)
+from geneva_examples.core.jobs import list_jobs as query_jobs
 from geneva_examples.core.spec import Example, Param, Step
 from geneva_examples.examples import all_examples
 from geneva_examples.tui.forms import field_id, initial_text
 
-_MODES = [
-    ("auto (config / geneva_host)", "auto"),
-    ("local", "local"),
-    ("enterprise", "enterprise"),
-]
+# Always an explicit mode — no "auto" that defers to config.yaml. In an
+# interactive app there is no command line recording what you picked, so the
+# control should read as exactly the backend you are connected to.
+_MODES = [("local", "local"), ("enterprise", "enterprise")]
 _LEVELS = [(lvl, lvl) for lvl in ("INFO", "DEBUG", "WARNING", "ERROR")]
 _TABLE_ROW_LIMIT = 100
+_JOB_LIST_LIMIT = 50
+# Follow interval for a non-terminal job. Geneva has no streaming log API, so
+# "following" is a re-read of the job record — the same poll `jobs tail` does.
+_JOB_POLL_SECONDS = 3.0
 
 # Geneva system tables worth browsing after a backfill: the job records and
 # the per-row error store. They live in the connection's system namespace.
@@ -68,6 +87,7 @@ _SYSTEM_TABLES = {
 
 
 _DETAIL_PLACEHOLDER = "select a cell to see its full value"
+_JOB_PLACEHOLDER = "select a job on the left (press [b]j[/b] to list them)"
 
 
 def _detail_text(value) -> str:
@@ -77,6 +97,18 @@ def _detail_text(value) -> str:
     if isinstance(value, (bytes, bytearray)):
         return f"<{len(value)} bytes>"
     return str(value)
+
+
+# Job status is the first thing you look for in a list of jobs, so it carries
+# the only colour in the pane. Values are rich styles, applied via Text.assemble
+# rather than markup — see _show_job.
+_STATUS_STYLES = {
+    "RUNNING": "cyan",
+    "PENDING": "yellow",
+    "DONE": "green",
+    "FAILED": "bold red",
+    "CANCELLED": "yellow",
+}
 
 
 def _open_any_table(conn, name: str, *, system: bool = False):
@@ -140,12 +172,16 @@ class GenevaTUI(App):
     #cell-detail { height: auto; min-height: 8; max-height: 60%;
                    border-top: solid $panel; padding: 0 1; }
     #cell-detail.expanded { min-height: 60%; max-height: 85%; }
+    #job-info { height: auto; padding: 0 0 1 0; }
+    #job-detail { height: 1fr; border-top: solid $panel; padding: 0 1; }
     .field-label { color: $text-muted; }
     """
 
     BINDINGS: ClassVar = [
         ("r", "run", "Run / refresh"),
         ("t", "refresh_tables", "List tables"),
+        ("j", "refresh_jobs", "List jobs"),
+        ("f", "toggle_follow", "Follow job"),
         ("d", "toggle_detail", "Detail size"),
         ("q", "quit", "Quit"),
     ]
@@ -163,6 +199,11 @@ class GenevaTUI(App):
         # so the detail pane resolves full values from these by coordinate.
         self._table_cols: list[str] = []
         self._table_rows: list[dict] = []
+        self._jobs_node = None
+        self._current_job: str | None = None
+        self._current_job_terminal = True
+        self._following = False
+        self._follow_timer = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -172,6 +213,8 @@ class GenevaTUI(App):
                 with Horizontal(id="controls"):
                     yield Select(_MODES, value="local", allow_blank=False, id="mode")
                     yield Input(placeholder="config.yaml (optional)", id="config")
+                    # Enterprise-only: geneva ignores db_uri on the local backend
+                    # (it connects to local_db_path). Shown/hidden by mode below.
                     yield Input(placeholder="db_uri override (optional)", id="db_uri")
                     yield Select(
                         _LEVELS, value="INFO", allow_blank=False, id="log_level"
@@ -196,11 +239,16 @@ class GenevaTUI(App):
                         yield DataTable(id="table-view", zebra_stripes=True)
                         with VerticalScroll(id="cell-detail"):
                             yield Static(_DETAIL_PLACEHOLDER, id="cell-value")
+                    with Vertical(id="job-pane"):
+                        yield Static(_JOB_PLACEHOLDER, id="job-info")
+                        with VerticalScroll(id="job-detail"):
+                            yield Static("", id="job-detail-value")
         yield Footer()
 
     async def on_mount(self) -> None:
         # Drain queued log lines onto the RichLog on the UI thread (10 Hz).
         self.set_interval(0.1, self._drain_log)
+        self._sync_db_uri_visibility()
         tree = self.query_one("#nav", Tree)
         tree.show_root = False
         tree.root.expand()
@@ -209,6 +257,12 @@ class GenevaTUI(App):
         # system tables) is the more frequent destination than re-running.
         self._tables_node = tree.root.add("Tables", expand=True)
         self._tables_node.add_leaf("↻ refresh", data=("tables-refresh",))
+
+        # Jobs sit between the data and the pipelines that produced it: after a
+        # run you either look at the rows or at why there aren't any. Listed on
+        # demand (unlike Tables) so startup opens exactly one connection.
+        self._jobs_node = tree.root.add("Jobs", expand=True)
+        self._jobs_node.add_leaf("↻ refresh", data=("jobs-refresh",))
 
         examples = tree.root.add("Examples", expand=True)
         first: tuple[Example, Step] | None = None
@@ -234,6 +288,10 @@ class GenevaTUI(App):
         if not data:
             return
         kind = data[0]
+        # Navigating away from the job view stops the poll: no background
+        # re-connecting for a pane nobody is looking at.
+        if kind not in ("job", "jobs-refresh"):
+            self._stop_follow()
         switcher = self.query_one("#main", ContentSwitcher)
         run_button = self.query_one("#run", Button)
         if kind == "step":
@@ -247,6 +305,12 @@ class GenevaTUI(App):
             self.query_one("#desc", Markdown).update(
                 f"# {ex.title}\n\n{ex.description}"
             )
+        elif kind == "jobs-refresh":
+            self._list_jobs(self._build_cfg())
+        elif kind == "job":
+            switcher.current = "job-pane"
+            run_button.label = "Refresh ⟳"
+            self._select_job(data[1])
         elif kind == "tables-refresh":
             self._list_tables(self._build_cfg())
         elif kind == "table":
@@ -303,20 +367,37 @@ class GenevaTUI(App):
         if widgets:
             await form.mount(*widgets)  # type: ignore[arg-type]
 
+    @on(Select.Changed, "#mode")
+    def _on_mode_changed(self, _event: Select.Changed) -> None:
+        self._sync_db_uri_visibility()
+
+    def _sync_db_uri_visibility(self) -> None:
+        """Show the db_uri field only on the backend that reads it.
+
+        Local mode connects to ``local_db_path`` and ignores ``db_uri`` entirely,
+        so leaving the box visible there invites edits that do nothing.
+        """
+        enterprise = self.query_one("#mode", Select).value == "enterprise"
+        self.query_one("#db_uri", Input).display = enterprise
+
+    def _db_uri_override(self) -> str | None:
+        """The db_uri override — only read on the backend that honors it."""
+        if self.query_one("#mode", Select).value != "enterprise":
+            return None
+        return self.query_one("#db_uri", Input).value.strip() or None
+
     def _build_cfg(self):
         """Build a Config from the current global controls (main thread)."""
         from pathlib import Path
 
         mode = self.query_one("#mode", Select).value
         config = self.query_one("#config", Input).value.strip()
-        db_uri = self.query_one("#db_uri", Input).value.strip()
-        cfg = load_config(
+        return load_config(
             Path(config) if config else None,
-            mode_override=None if mode == "auto" else mode,
+            mode_override=mode,
+            # Only meaningful on the enterprise backend, where the field shows.
+            db_uri_override=self._db_uri_override(),
         )
-        if db_uri:
-            cfg.db_uri = db_uri
-        return cfg
 
     # --- table viewer -----------------------------------------------------
 
@@ -476,6 +557,155 @@ class GenevaTUI(App):
             Text.assemble((column, "bold"), "\n", _detail_text(value))
         )
 
+    # --- jobs viewer ------------------------------------------------------
+
+    def action_refresh_jobs(self) -> None:
+        self._list_jobs(self._build_cfg())
+
+    @work(thread=True, group="viewer", exclusive=True)
+    def _list_jobs(self, cfg) -> None:
+        try:
+            conn = connect(cfg)
+            # Every status, not just the active ones the CLI defaults to: in a
+            # browser the interesting job is usually the one that already
+            # finished (or failed), not the one still running.
+            jobs = sort_newest_first(query_jobs(conn, None, ALL_STATUSES))
+            tally = status_counts(jobs)
+            rows = [
+                (
+                    str(getattr(jr, "job_id", "") or ""),
+                    "{:<9} {:<9} {}".format(
+                        job_status(jr),
+                        str(getattr(jr, "job_id", "-"))[:8],
+                        getattr(jr, "table_name", "-"),
+                    ),
+                )
+                for jr in jobs[:_JOB_LIST_LIMIT]
+            ]
+            err = None
+        except Exception as exc:  # noqa: BLE001 - surface to the tree
+            rows, tally, err = [], "", f"{type(exc).__name__}: {exc}"
+        self.call_from_thread(self._set_jobs, rows, tally, err)
+
+    def _set_jobs(
+        self, rows: list[tuple[str, str]], tally: str, err: str | None
+    ) -> None:
+        node = self._jobs_node
+        if node is None:
+            return
+        node.remove_children()
+        node.set_label(f"Jobs — {tally}" if tally else "Jobs")
+        node.add_leaf("↻ refresh", data=("jobs-refresh",))
+        if err:
+            node.add_leaf(f"⚠ {err[:48]}", data=None)
+        elif not rows:
+            node.add_leaf("(no jobs)", data=None)
+        else:
+            for job_id, label in rows:
+                node.add_leaf(label, data=("job", job_id))
+        node.expand()
+
+    def _select_job(self, job_id: str) -> None:
+        """Show one job's record, loading it in the background."""
+        self._current_job = job_id
+        self.query_one("#job-info", Static).update(f"loading job {job_id}…")
+        self._load_job(self._build_cfg(), job_id)
+
+    @work(thread=True, group="viewer", exclusive=True)
+    def _load_job(self, cfg, job_id: str) -> None:
+        try:
+            conn = connect(cfg)
+            jr = conn.get_job(job_id)
+            status = job_status(jr)
+            summary = (status, job_target(jr), elapsed(jr), progress_summary(jr))
+            # No events_limit: the CLI truncates because a terminal dump is
+            # expensive, but this pane scrolls — show the whole log.
+            detail = format_detail(jr, events_limit=None)
+            terminal = status in TERMINAL_STATUSES
+            err = None
+        except ValueError:  # geneva raises this for an unknown id
+            summary, detail, terminal, err = None, "", True, "not found"
+        except Exception as exc:  # noqa: BLE001 - surface to the info line
+            summary, detail, terminal = None, "", True
+            err = f"{type(exc).__name__}: {exc}"
+        self.call_from_thread(self._show_job, job_id, summary, detail, terminal, err)
+
+    def _show_job(
+        self,
+        job_id: str,
+        summary: tuple[str, str, str, str] | None,
+        detail: str,
+        terminal: bool,
+        err: str | None,
+    ) -> None:
+        """Render one job record.
+
+        Assembled as ``Text``, never markup: job ids, table/column names and
+        exception messages are geneva-supplied strings, and a stray bracket in
+        one of them would otherwise blow up the markup parser mid-render.
+        """
+        from rich.text import Text
+
+        info = self.query_one("#job-info", Static)
+        value = self.query_one("#job-detail-value", Static)
+        self._current_job_terminal = terminal
+        if err or summary is None:
+            info.update(Text(f"{job_id}: {err}", style="red"))
+            value.update("")
+            self._stop_follow()
+            return
+        status, target, elapsed_for, progress = summary
+        line = Text.assemble(
+            (job_id, "bold"),
+            "  ",
+            (status, _STATUS_STYLES.get(status, "")),
+            f" · {target} · elapsed {elapsed_for}",
+        )
+        if progress:
+            line.append(f"\nprogress: {progress}", style="dim")
+        if self._following:
+            line.append(
+                f"  · following every {_JOB_POLL_SECONDS:g}s", style="dim italic"
+            )
+        info.update(line)
+        value.update(Text(detail))
+        # A job that reached a terminal state won't change again — stop polling
+        # rather than hammer the connection for a record that is now frozen.
+        if terminal:
+            self._stop_follow()
+
+    def action_toggle_follow(self) -> None:
+        """Re-read the selected job every few seconds while it is still running.
+
+        The TUI equivalent of ``jobs tail``: geneva exposes no streaming log, so
+        following means polling the record. Only offered on a live job.
+        """
+        if self.query_one("#main", ContentSwitcher).current != "job-pane":
+            return
+        if self._following:
+            self._stop_follow()
+            self.notify("stopped following")
+            return
+        if not self._current_job:
+            self.notify("select a job first")
+            return
+        if self._current_job_terminal:
+            self.notify("job has already finished — nothing to follow")
+            return
+        self._following = True
+        self._follow_timer = self.set_interval(_JOB_POLL_SECONDS, self._poll_job)
+        self._select_job(self._current_job)
+
+    def _stop_follow(self) -> None:
+        self._following = False
+        if self._follow_timer is not None:
+            self._follow_timer.stop()
+            self._follow_timer = None
+
+    def _poll_job(self) -> None:
+        if self._following and self._current_job:
+            self._load_job(self._build_cfg(), self._current_job)
+
     # --- running ----------------------------------------------------------
 
     def write_log(self, message: str) -> None:
@@ -502,9 +732,16 @@ class GenevaTUI(App):
         self._start_run()
 
     def _start_run(self) -> None:
-        # In the Tables view the primary action re-queries the shown table rather
-        # than running a step's UDF.
-        if self.query_one("#main", ContentSwitcher).current == "table-pane":
+        # In the Tables/Jobs views the primary action re-queries what is on
+        # screen rather than running a step's UDF.
+        pane = self.query_one("#main", ContentSwitcher).current
+        if pane == "job-pane":
+            if self._current_job:
+                self._select_job(self._current_job)
+            else:
+                self._list_jobs(self._build_cfg())
+            return
+        if pane == "table-pane":
             if self._current_table:
                 self.query_one("#table-info", Static).update(
                     f"refreshing {self._current_table}…"
@@ -526,13 +763,11 @@ class GenevaTUI(App):
     def _build_argv(self, step: Step) -> list[str]:
         """Translate the form + global controls into the step CLI's arguments."""
         argv: list[str] = []
-        mode = self.query_one("#mode", Select).value
-        if mode and mode != "auto":
-            argv += ["--mode", mode]
+        argv += ["--mode", self.query_one("#mode", Select).value]
         config = self.query_one("#config", Input).value.strip()
         if config:
             argv += ["--config", config]
-        db_uri = self.query_one("#db_uri", Input).value.strip()
+        db_uri = self._db_uri_override()
         if db_uri:
             argv += ["--db-uri", db_uri]
         argv += ["--log-level", self.query_one("#log_level", Select).value]

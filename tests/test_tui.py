@@ -40,14 +40,17 @@ def test_tui_mounts_examples_and_tables_sections(monkeypatch):
             await pilot.pause()
             tree = app.query_one("#nav", Tree)
             sections = [n.label.plain for n in tree.root.children]
-            assert sections == ["Tables", "Examples"]  # tables lead the nav
+            assert sections == ["Tables", "Jobs", "Examples"]  # tables lead the nav
             # the app opens on the Tables view and refreshes the listing
             assert app.query_one("#main", ContentSwitcher).current == "table-pane"
             assert str(app.query_one("#run", Button).label) == "Refresh ⟳"
             assert len(refreshes) == 1
             assert app.query_one("#mode", Select).value == "local"  # local default
             assert not app.query_one("#table-filter", Input).display  # hidden
-            examples_node = tree.root.children[1]
+            # Jobs are listed on demand, so only the refresh leaf is there
+            jobs_node = tree.root.children[1]
+            assert [n.label.plain for n in jobs_node.children] == ["↻ refresh"]
+            examples_node = tree.root.children[2]
             # images, video, pdf, audio, debugging
             assert len(examples_node.children) == 5
 
@@ -202,6 +205,144 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
             grid = app.query_one("#table-view", DataTable)
             labels = [str(c.label) for c in grid.columns.values()]
             assert labels == ["job_id", "error_type", "timestamp", "error_id"]
+
+    asyncio.run(scenario())
+
+
+def test_tui_db_uri_field_only_shows_in_enterprise_mode(monkeypatch):
+    """db_uri is ignored on the local backend, so the field hides there."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            field = app.query_one("#db_uri", Input)
+            assert not field.display  # local is the default mode
+
+            app.query_one("#mode", Select).value = "enterprise"
+            await pilot.pause()
+            assert field.display
+
+            # a value typed in enterprise mode reaches argv...
+            field.value = "  db://prod  "
+            assert app._db_uri_override() == "db://prod"
+
+            # ...but is not read back once the mode no longer honors it
+            app.query_one("#mode", Select).value = "local"
+            await pilot.pause()
+            assert not field.display
+            assert app._db_uri_override() is None
+
+    asyncio.run(scenario())
+
+
+def test_tui_jobs_section_lists_and_shows_a_record(monkeypatch):
+    """The Jobs section fills from job records and renders one on selection."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app._set_jobs(
+                [("abc123def456", "DONE      abc123de  video_clips")],
+                "1 DONE",
+                None,
+            )
+            await pilot.pause()
+            jobs_node = app.query_one("#nav", Tree).root.children[1]
+            assert jobs_node.label.plain == "Jobs — 1 DONE"  # tally in the header
+            labels = [n.label.plain for n in jobs_node.children]
+            assert labels == ["↻ refresh", "DONE      abc123de  video_clips"]
+
+            app.query_one("#main").current = "job-pane"
+            app._show_job(
+                "abc123def456",
+                ("DONE", "video_clips.embedding", "0:01:02", "rows 9/10 (90%)"),
+                "job_id:     abc123def456\nevents (1 total):\n    [worker] done",
+                True,
+                None,
+            )
+            await pilot.pause()
+            info = str(app.query_one("#job-info", Static)._content)
+            assert "abc123def456" in info and "video_clips.embedding" in info
+            assert "0:01:02" in info
+            assert "rows 9/10 (90%)" in info  # progress surfaced up top
+            # brackets in the event log survive verbatim (not parsed as markup)
+            detail = str(app.query_one("#job-detail-value", Static)._content)
+            assert "[worker] done" in detail
+
+    asyncio.run(scenario())
+
+
+def test_tui_job_errors_render_without_markup_crash(monkeypatch):
+    """A geneva message containing brackets reaches the info line as text."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one("#main").current = "job-pane"
+            app._show_job("j-1", None, "", True, "RuntimeError: bad [tag] here")
+            await pilot.pause()
+            info = str(app.query_one("#job-info", Static)._content)
+            assert "bad [tag] here" in info
+
+    asyncio.run(scenario())
+
+
+def test_tui_follow_stops_when_job_reaches_terminal_state(monkeypatch):
+    """Following polls a live job and gives up once the record is frozen."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._load_job = lambda cfg, job_id: None  # no connection in tests
+            app.query_one("#main", ContentSwitcher).current = "job-pane"
+            app._current_job = "j-1"
+            app._current_job_terminal = False
+
+            app.action_toggle_follow()
+            assert app._following
+
+            # the next poll comes back DONE -> following switches itself off
+            app._show_job(
+                "j-1", ("DONE", "images.embedding", "0:00:05", ""), "", True, None
+            )
+            await pilot.pause()
+            assert not app._following
+            assert app._follow_timer is None
+
+            # and a finished job can't be followed again
+            app.action_toggle_follow()
+            assert not app._following
+
+    asyncio.run(scenario())
+
+
+def test_tui_run_refreshes_job_in_job_view(monkeypatch):
+    """In the Jobs view the Run action re-reads the job, not a step's UDF."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        loaded: list[str] = []
+        ran: list = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._load_job = lambda cfg, job_id: loaded.append(job_id)
+            app._run_step = lambda step, argv: ran.append(step)
+            app.query_one("#main").current = "job-pane"
+            app._current_job = "j-7"
+            app.action_run()
+            await pilot.pause()
+        assert loaded == ["j-7"]
+        assert ran == []
 
     asyncio.run(scenario())
 

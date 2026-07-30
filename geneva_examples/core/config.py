@@ -21,10 +21,13 @@ Table names are *not* config: each CLI declares its own ``--table-name`` default
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODE = "local"
 DEFAULT_DB_URI = "db://quickstart"
@@ -133,10 +136,47 @@ def resolve_mode(mode_override: str | None, data: dict) -> str:
     return "enterprise" if data.get("geneva_host") else "local"
 
 
+# Uri schemes that mean "somewhere else, deliberately": geneva accepts object
+# storage directly, so these are passed through untouched.
+_URI_PATH_PREFIXES = ("/", "./", "../", "~")
+
+
+def normalize_db_uri(db_uri: str, mode: str) -> str:
+    """Restore the ``db://`` scheme on a scheme-less enterprise ``db_uri``.
+
+    geneva reads any uri that is *not* ``db://…`` as an **on-disk** database,
+    created relative to the working directory — so a bare ``tts`` silently gives
+    you a local ``./tts/`` while you believe you are talking to the cluster
+    (this is where stray database directories at the repo root come from). In
+    enterprise mode a bare name is always a mistake, so it is corrected here and
+    logged at WARNING so the correction is visible.
+
+    Left alone: anything already carrying a scheme (``db://``, ``s3://``,
+    ``gs://``, ``az://`` — geneva supports object storage directly), explicit
+    filesystem paths, and every uri in local mode (where ``db_uri`` is unused).
+    """
+    if mode != "enterprise":
+        return db_uri
+    value = db_uri.strip()
+    if not value or "://" in value or value.startswith(_URI_PATH_PREFIXES):
+        return db_uri
+    corrected = f"db://{value}"
+    logger.warning(
+        "db_uri %r has no scheme — using %r. geneva would otherwise have read it "
+        "as an on-disk database and created ./%s here instead of connecting to "
+        "the cluster.",
+        db_uri,
+        corrected,
+        value,
+    )
+    return corrected
+
+
 def load_config(
     config_path: Path | None = None,
     *,
     mode_override: str | None = None,
+    db_uri_override: str | None = None,
 ) -> Config:
     """Load configuration from ``config_path`` (default: ./config.yaml).
 
@@ -144,6 +184,10 @@ def load_config(
     optional and no secrets are required. In ``enterprise`` mode the file must
     exist and provide ``lancedb_api_key``, ``lancedb_region``, and
     ``geneva_host``.
+
+    ``db_uri_override`` (a ``--db-uri`` flag) takes precedence over the file's
+    ``db_uri``. Resolving it here rather than by assigning to the returned
+    Config keeps :func:`normalize_db_uri` on the single path every caller uses.
     """
     if config_path is None:
         config_path = Path("config.yaml")
@@ -174,7 +218,9 @@ def load_config(
         lancedb_api_key=data.get("lancedb_api_key"),
         lancedb_region=data.get("lancedb_region"),
         geneva_host=data.get("geneva_host"),
-        db_uri=data.get("db_uri") or DEFAULT_DB_URI,
+        db_uri=normalize_db_uri(
+            db_uri_override or data.get("db_uri") or DEFAULT_DB_URI, mode
+        ),
         local_db_path=data.get("local_db_path") or DEFAULT_LOCAL_DB_PATH,
         s3_access_key=data.get("s3_access_key"),
         s3_secret_key=data.get("s3_secret_key"),

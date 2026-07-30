@@ -77,25 +77,31 @@ def backfill_column(
             sleep_s=wait_sleep_s,
         )
 
-    # The local (NativeTable) and remote (RemoteConnection) backfill APIs differ:
-    # local runs on local Ray and has no `task_size`/`use_cpu_only_pool`/
-    # `checkpoint_size` — the checkpoint knob is `max_checkpoint_size`, and the
-    # worker-pool routing is remote-only.
+    # `task_size` applies to BOTH paths: it is plain read-task planning (rows per
+    # worker task), and geneva routes local and remote backfills through the same
+    # `run_ray_add_column(task_size=...)` — `NativeTable` is an alias of `Table`.
+    # It matters most locally, where an oversized task on a slow UDF is what
+    # trips the stall watchdog. Omitting it lets geneva default to
+    # `count_rows() // num_workers // 2`, which ignores the caller's setting.
     is_remote = bool(conn.is_remote())
+    backfill_kwargs: dict = dict(task_size=task_size)
     if is_remote:
-        backfill_kwargs = dict(
-            task_size=task_size,
+        backfill_kwargs.update(
             checkpoint_size=checkpoint_size,
+            # Pins appliers to the cluster's CPU-only node pool via a custom Ray
+            # resource that only the remote cluster advertises — requesting it on
+            # local Ray would leave the tasks unschedulable.
             use_cpu_only_pool=use_cpu_only_pool,
         )
     else:
         # Local Ray has only this machine's cores. Cap concurrency (leaving a core
         # for the raylet/driver) and skip admission pre-flight so tasks queue for a
-        # free slot instead of the job being rejected up front.
+        # free slot instead of the job being rejected up front. The checkpoint knob
+        # is `max_checkpoint_size` here (a cap), not `checkpoint_size` (a target).
         from geneva_examples.core.common import local_concurrency
 
         concurrency = local_concurrency(concurrency)
-        backfill_kwargs = dict(
+        backfill_kwargs.update(
             max_checkpoint_size=checkpoint_size,
             _admission_check=False,
         )

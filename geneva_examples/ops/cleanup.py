@@ -43,9 +43,7 @@ def run(
     setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
-    cfg = load_config(config, mode_override=mode)
-    if db_uri:
-        cfg.db_uri = db_uri
+    cfg = load_config(config, mode_override=mode, db_uri_override=db_uri)
     location = cfg.local_db_path if cfg.is_local else cfg.db_uri
 
     # Preserve order while de-duplicating (e.g. if videos_table == clips_table).

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,14 +11,23 @@ import typer
 
 from geneva_examples.core.common import connect, setup_logging
 from geneva_examples.core.config import Config, load_config
+from geneva_examples.core.jobs import (
+    ACTIVE_STATUSES,
+    ALL_STATUSES,
+    TERMINAL_STATUSES,
+    elapsed,
+    format_detail,
+    format_dt,
+    job_status,
+    job_target,
+    metrics_line,
+    sort_newest_first,
+)
+from geneva_examples.core.jobs import list_jobs as query_jobs
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(add_completion=False, help=__doc__)
-
-_ACTIVE = ["RUNNING", "PENDING"]
-_ALL_STATUSES = ["PENDING", "RUNNING", "DONE", "FAILED", "CANCELLED"]
-_TERMINAL = {"DONE", "FAILED", "CANCELLED"}
 
 
 def _open_connection(
@@ -34,129 +41,13 @@ def _open_connection(
 
     import geneva  # noqa: F401  (ensure importable before connect)
 
-    cfg = load_config(config, mode_override=mode)
-    if db_uri:
-        cfg.db_uri = db_uri
+    cfg = load_config(config, mode_override=mode, db_uri_override=db_uri)
     return cfg, connect(cfg)
 
 
-def _status(jr: object) -> str:
-    s = getattr(jr, "status", None)
-    return getattr(s, "value", str(s))
-
-
-def _list_jobs(conn: Any, table: str | None, statuses: list[str]) -> list:
-    """Union jobs across statuses.
-
-    geneva's ``list_jobs`` builds an empty ``WHERE`` clause (invalid SQL) when no
-    filter is passed, so we always query per-status and merge by job_id.
-    """
-    merged: dict = {}
-    for s in statuses:
-        try:
-            for jr in conn.list_jobs(table_name=table, status=s):
-                merged[getattr(jr, "job_id", None) or id(jr)] = jr
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("list_jobs(status=%s) failed: %s", s, exc)
-    return list(merged.values())
-
-
-def _fmt_dt(value: object) -> str:
-    if not isinstance(value, datetime):
-        return "-"
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _elapsed(jr: object) -> str:
-    start = getattr(jr, "launched_at", None)
-    if not isinstance(start, datetime):
-        return "-"
-    end = getattr(jr, "completed_at", None)
-    if not isinstance(end, datetime):
-        end = datetime.now(UTC)
-    secs = max(0, int((end - start).total_seconds()))
-    h, rem = divmod(secs, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:d}:{m:02d}:{s:02d}"
-
-
-def _metrics_line(jr: object) -> str:
-    """One-line ``name n/total`` summary of a job's metrics, or '' if none."""
-    parts = []
-    for m in getattr(jr, "metrics", None) or []:
-        name = getattr(m, "name", "?")
-        n, total = getattr(m, "n", "?"), getattr(m, "total", "?")
-        parts.append(f"{name} {n}/{total}")
-    return "  ".join(parts)
-
-
-def _fmt_config(value: object) -> str:
-    """Pretty-print the job's launch ``config``, which geneva stores as JSON text."""
-    if not value:
-        return ""
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (ValueError, TypeError):
-            return value
-    try:
-        return json.dumps(value, indent=2, default=str, sort_keys=True)
-    except (TypeError, ValueError):
-        return str(value)
-
-
 def _print_detail(jr: object, events_limit: int | None = 10) -> None:
-    """Print a full job record.
-
-    ``events_limit`` caps how many trailing events are shown; pass ``None`` to
-    print the complete append-only event log (useful for diagnosing failures
-    whose root-cause event scrolled past the tail).
-    """
-    typer.echo(f"job_id:     {getattr(jr, 'job_id', '-')}")
-    typer.echo(f"status:     {_status(jr)}")
-    typer.echo(f"type:       {getattr(jr, 'job_type', '-')}")
-    typer.echo(
-        f"target:     {getattr(jr, 'table_name', '-')}.{getattr(jr, 'column_name', '-')}"
-    )
-    typer.echo(f"cluster:    {getattr(jr, 'cluster_name', None) or '-'}")
-    typer.echo(
-        f"launched:   {_fmt_dt(getattr(jr, 'launched_at', None))} by {getattr(jr, 'launched_by', None) or '-'}"
-    )
-    typer.echo(f"updated:    {_fmt_dt(getattr(jr, 'updated_at', None))}")
-    typer.echo(f"completed:  {_fmt_dt(getattr(jr, 'completed_at', None))}")
-    typer.echo(f"elapsed:    {_elapsed(jr)}")
-
-    object_ref = getattr(jr, "object_ref", None)
-    if object_ref:
-        typer.echo(f"object_ref: {object_ref}")
-    manifest_id = getattr(jr, "manifest_id", None)
-    if manifest_id:
-        checksum = getattr(jr, "manifest_checksum", None) or "-"
-        typer.echo(f"manifest:   {manifest_id} (checksum {checksum})")
-
-    config = _fmt_config(getattr(jr, "config", None))
-    if config:
-        typer.echo("config:")
-        for line in config.splitlines():
-            typer.echo(f"    {line}")
-
-    metrics = getattr(jr, "metrics", None) or []
-    if metrics:
-        typer.echo("metrics:")
-        for m in metrics:
-            name = getattr(m, "name", "?")
-            n, total = getattr(m, "n", "?"), getattr(m, "total", "?")
-            desc = getattr(m, "desc", "")
-            typer.echo(f"    {name}: {n}/{total} {desc}")
-    events = getattr(jr, "events", None) or []
-    if events:
-        shown = events if events_limit is None else events[-events_limit:]
-        hidden = len(events) - len(shown)
-        label = f"events ({len(events)} total"
-        label += f", showing last {len(shown)})" if hidden > 0 else ")"
-        typer.echo(f"{label}:")
-        for e in shown:
-            typer.echo(f"    {e}")
+    """Print a full job record (the same rendering the TUI's Jobs view shows)."""
+    typer.echo(format_detail(jr, events_limit))
 
 
 @app.callback(invoke_without_command=True)
@@ -204,17 +95,10 @@ def list_jobs(
     if status:
         statuses = [status.upper()]
     elif show_all:
-        statuses = _ALL_STATUSES
+        statuses = ALL_STATUSES
     else:
-        statuses = _ACTIVE
-    jobs = _list_jobs(conn, table, statuses)
-
-    jobs.sort(
-        key=lambda j: (
-            getattr(j, "launched_at", None) or datetime.min.replace(tzinfo=UTC)
-        ),
-        reverse=True,
-    )
+        statuses = ACTIVE_STATUSES
+    jobs = sort_newest_first(query_jobs(conn, table, statuses))
 
     scope = status or ("all" if show_all else "active (PENDING/RUNNING)")
     typer.echo(
@@ -228,10 +112,9 @@ def list_jobs(
     typer.echo(header)
     typer.echo("-" * len(header))
     for jr in jobs[:limit]:
-        target = f"{getattr(jr, 'table_name', '-')}.{getattr(jr, 'column_name', '-')}"
         typer.echo(
-            f"{_status(jr):<9} {getattr(jr, 'job_type', '-'):<10} {_elapsed(jr):>9}  "
-            f"{_fmt_dt(getattr(jr, 'launched_at', None)):<19}  {target}  "
+            f"{job_status(jr):<9} {getattr(jr, 'job_type', '-'):<10} {elapsed(jr):>9}  "
+            f"{format_dt(getattr(jr, 'launched_at', None)):<19}  {job_target(jr)}  "
             f"{getattr(jr, 'job_id', '-')}"
         )
 
@@ -297,10 +180,10 @@ def kill(
         typer.secho(f"job {job_id} not found on {cfg.db_uri}", fg="red", err=True)
         raise typer.Exit(code=1) from None
 
-    status = _status(jr)
-    target = f"{getattr(jr, 'table_name', '-')}.{getattr(jr, 'column_name', '-')}"
+    status = job_status(jr)
+    target = job_target(jr)
 
-    if status in _TERMINAL and not force:
+    if status in TERMINAL_STATUSES and not force:
         typer.echo(
             f"job {job_id} ({target}) is already {status}; nothing to cancel "
             "(use --force to mark CANCELLED anyway)."
@@ -359,8 +242,7 @@ def tail(
         typer.secho(f"job {job_id} not found on {cfg.db_uri}", fg="red", err=True)
         raise typer.Exit(code=1) from None
 
-    target = f"{getattr(jr, 'table_name', '-')}.{getattr(jr, 'column_name', '-')}"
-    typer.echo(f"tailing job {job_id} ({target}) on {cfg.db_uri}")
+    typer.echo(f"tailing job {job_id} ({job_target(jr)}) on {cfg.db_uri}")
 
     printed = 0  # events already emitted
     last_metrics = ""
@@ -373,17 +255,17 @@ def tail(
                 typer.echo(f"  {ev}")
             printed = len(events)
 
-            status = _status(jr)
+            status = job_status(jr)
             if status != last_status:
                 typer.secho(f"  [status: {status}]", fg="cyan")
                 last_status = status
 
-            metrics = _metrics_line(jr)
+            metrics = metrics_line(jr)
             if metrics and metrics != last_metrics:
                 typer.echo(f"  [metrics: {metrics}]")
                 last_metrics = metrics
 
-            if once or status in _TERMINAL:
+            if once or status in TERMINAL_STATUSES:
                 break
 
             time.sleep(max(0.5, interval))

@@ -177,10 +177,7 @@ def resolve_config(
     """
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     setup_logging(log_level)
-    cfg = load_config(config, mode_override=mode)
-    if db_uri:
-        cfg.db_uri = db_uri
-    return cfg
+    return load_config(config, mode_override=mode, db_uri_override=db_uri)
 
 
 # --- CLI generation ---------------------------------------------------------

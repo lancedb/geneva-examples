@@ -10,6 +10,7 @@ from geneva_examples.core.config import (
     DEFAULT_DB_URI,
     DEFAULT_LOCAL_DB_PATH,
     load_config,
+    normalize_db_uri,
     resolve_mode,
 )
 
@@ -38,6 +39,71 @@ def test_resolve_mode_infers_enterprise_from_geneva_host():
 
 def test_resolve_mode_defaults_to_local():
     assert resolve_mode(None, {}) == "local"
+
+
+# --- db_uri normalization ----------------------------------------------------
+
+
+def test_normalize_db_uri_prepends_scheme_for_bare_enterprise_name(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        assert normalize_db_uri("tts", "enterprise") == "db://tts"
+    # the correction is surfaced, not silent
+    assert "no scheme" in caplog.text
+    assert "db://tts" in caplog.text
+
+
+def test_normalize_db_uri_leaves_existing_schemes_alone():
+    for uri in ("db://tts", "s3://bucket/db", "gs://bucket/db", "az://container/db"):
+        assert normalize_db_uri(uri, "enterprise") == uri
+
+
+def test_normalize_db_uri_leaves_filesystem_paths_alone():
+    # An explicit path is a deliberate on-disk database, not a typo.
+    for uri in ("./scratch", "../scratch", "/tmp/scratch", "~/scratch"):
+        assert normalize_db_uri(uri, "enterprise") == uri
+
+
+def test_normalize_db_uri_is_a_noop_in_local_mode(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        assert normalize_db_uri("tts", "local") == "tts"
+    assert caplog.text == ""  # local ignores db_uri; no warning to give
+
+
+def test_normalize_db_uri_tolerates_blank():
+    assert normalize_db_uri("", "enterprise") == ""
+    assert normalize_db_uri("   ", "enterprise") == "   "
+
+
+def test_load_config_normalizes_bare_db_uri_from_file(tmp_path: Path):
+    cfg_path = _write(
+        tmp_path / "c.yaml",
+        "mode: enterprise\nlancedb_api_key: k\nlancedb_region: r\n"
+        "geneva_host: http://h\ndb_uri: tts\n",
+    )
+    assert load_config(cfg_path).db_uri == "db://tts"
+
+
+def test_load_config_db_uri_override_wins_and_is_normalized(tmp_path: Path):
+    cfg_path = _write(
+        tmp_path / "c.yaml",
+        "mode: enterprise\nlancedb_api_key: k\nlancedb_region: r\n"
+        "geneva_host: http://h\ndb_uri: db://from-file\n",
+    )
+    cfg = load_config(cfg_path, db_uri_override="smoke")
+    assert cfg.db_uri == "db://smoke"
+
+
+def test_load_config_db_uri_override_ignored_when_blank(tmp_path: Path):
+    cfg_path = _write(
+        tmp_path / "c.yaml",
+        "mode: enterprise\nlancedb_api_key: k\nlancedb_region: r\n"
+        "geneva_host: http://h\ndb_uri: db://from-file\n",
+    )
+    assert load_config(cfg_path, db_uri_override=None).db_uri == "db://from-file"
 
 
 def test_resolve_mode_invalid_raises():
@@ -117,6 +183,29 @@ def _s3_config(tmp_path: Path, allow_http_line: str) -> dict:
 
 def test_aws_allow_http_defaults_false(tmp_path: Path):
     assert _s3_config(tmp_path, "")["aws_allow_http"] == "false"
+
+
+def test_azure_credentials_take_precedence_over_s3(tmp_path: Path):
+    """Azure wins when both sets are present — the account-less az:// root
+    URI can't be resolved without the account named here."""
+    body = (
+        "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\n"
+        "s3_access_key: a\ns3_secret_key: s\ns3_endpoint: e\ns3_region: auto\n"
+        "azure_account_name: acct\nazure_account_key: secret\n"
+    )
+    opts = load_config(_write(tmp_path / "c.yaml", body)).storage_options()
+    assert opts == {
+        "azure_storage_account_name": "acct",
+        "azure_storage_account_key": "secret",
+    }
+
+
+def test_azure_requires_both_name_and_key(tmp_path: Path):
+    body = (
+        "lancedb_api_key: k\nlancedb_region: r\ngeneva_host: h\n"
+        "azure_account_name: acct\n"  # key missing -> not usable
+    )
+    assert load_config(_write(tmp_path / "c.yaml", body)).storage_options() is None
 
 
 @pytest.mark.parametrize(

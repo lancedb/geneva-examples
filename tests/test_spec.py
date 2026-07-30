@@ -62,6 +62,54 @@ def test_build_command_parses_and_calls_run():
     assert isinstance(calls["cfg"], Config) and calls["cfg"].is_local
 
 
+def test_build_command_db_uri_override_reaches_config_normalized(tmp_path):
+    """`--db-uri` flows through resolve_config and keeps its db:// scheme.
+
+    Regression guard: the override used to be applied by assigning to the
+    returned Config, which bypassed normalization — a bare name then silently
+    became an on-disk database instead of a cluster connection.
+    """
+    calls: dict = {}
+
+    def run(cfg) -> None:
+        calls["cfg"] = cfg
+
+    step = Step("demo", "Demo", "desc", run)
+    cmd = build_command(Example("x", "X", "d", "image", (step,)), step)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mode: enterprise\nlancedb_api_key: k\nlancedb_region: r\n"
+        "geneva_host: http://h\ndb_uri: db://from-file\n"
+    )
+    result = CliRunner().invoke(
+        cmd, ["--config", str(config_file), "--db-uri", "scratch"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls["cfg"].db_uri == "db://scratch"  # overrode the file, kept scheme
+
+
+def test_build_command_without_db_uri_keeps_the_file_value(tmp_path):
+    calls: dict = {}
+
+    def run(cfg) -> None:
+        calls["cfg"] = cfg
+
+    step = Step("demo", "Demo", "desc", run)
+    cmd = build_command(Example("x", "X", "d", "image", (step,)), step)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "mode: enterprise\nlancedb_api_key: k\nlancedb_region: r\n"
+        "geneva_host: http://h\ndb_uri: db://from-file\n"
+    )
+    result = CliRunner().invoke(cmd, ["--config", str(config_file)])
+
+    assert result.exit_code == 0, result.output
+    assert calls["cfg"].db_uri == "db://from-file"
+
+
 def test_build_command_range_validation():
     def run(cfg, *, n: int = 1) -> None: ...
 
@@ -69,6 +117,31 @@ def test_build_command_range_validation():
     cmd = build_command(Example("x", "X", "d", "image", (step,)), step)
     bad = CliRunner().invoke(cmd, ["--mode", "local", "--n", "99"])
     assert bad.exit_code != 0  # out of range
+
+
+def test_build_command_choice_param_rejects_unknown_value():
+    """A `choices` param becomes a click.Choice, so bad values fail at parse."""
+    calls: dict = {}
+
+    def run(cfg, *, fmt: str = "wav") -> None:
+        calls["fmt"] = fmt
+
+    step = Step(
+        "demo",
+        "Demo",
+        "desc",
+        run,
+        params=(Param("fmt", str, "wav", "format", choices=("wav", "mp3")),),
+    )
+    cmd = build_command(Example("x", "X", "d", "image", (step,)), step)
+
+    ok = CliRunner().invoke(cmd, ["--mode", "local", "--fmt", "mp3"])
+    assert ok.exit_code == 0, ok.output
+    assert calls["fmt"] == "mp3"
+
+    bad = CliRunner().invoke(cmd, ["--mode", "local", "--fmt", "flac"])
+    assert bad.exit_code != 0
+    assert "flac" in bad.output
 
 
 def test_build_command_help_shows_description():
