@@ -30,6 +30,7 @@ from geneva_examples.core.common import (
     connect,
     format_sample,
     local_concurrency,
+    require_stable_row_ids,
     resolve_resources,
     runtime_session,
 )
@@ -111,6 +112,10 @@ def run(
 
     conn = connect(cfg)
     src = conn.open_table(source_table)
+    # A chunker MV is only refreshable across source versions when the SOURCE has
+    # stable row IDs, and nothing can add them after the fact. Check before
+    # creating the view rather than discovering it on a later refresh.
+    require_stable_row_ids(src, source_table)
 
     if overwrite:
         try:
