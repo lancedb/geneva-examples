@@ -1,6 +1,11 @@
 # --- Project-specific ---
 # secrets + connection; copy from config-example.yaml
 config.yaml
+# per-environment variants (config.onextech.yaml, config.staging.yaml, ...) used
+# via `--config`. These hold API keys too, so ignore the whole family rather
+# than only the default filename. config-example*.yaml stays tracked.
+config.*.yaml
+!config-example*.yaml
 # local-mode on-disk Lance database (geneva.connect against a Path)
 local_db/
 # local MP4 download cache (ingest-videos)
