@@ -19,7 +19,28 @@ from textual.widgets import (
     Tree,
 )
 
+from geneva_examples.core.config import Config
 from geneva_examples.tui.app import GenevaTUI
+
+
+def _stub_config(monkeypatch) -> None:
+    """Resolve a Config for any mode without a real config.yaml on disk.
+
+    Enterprise mode requires the file, and ``config.yaml`` is gitignored — so a
+    test that switches backends would otherwise pass only on a machine that
+    happens to have one and fail in CI, where the nav picks up a
+    ``⚠ config file not found`` leaf instead of the empty listing it asserts.
+    """
+    from geneva_examples.tui import app as tui_app
+
+    monkeypatch.setattr(
+        tui_app,
+        "load_config",
+        lambda path=None, *, mode_override=None, db_uri_override=None: Config(
+            mode=mode_override or "local",
+            db_uri=db_uri_override or "db://test",
+        ),
+    )
 
 
 def _quiet_tables(monkeypatch) -> list:
@@ -220,6 +241,7 @@ def test_tui_system_table_filter_pushes_where(monkeypatch):
 
 def test_tui_db_uri_field_only_shows_in_enterprise_mode(monkeypatch):
     """db_uri is ignored on the local backend, so the field hides there."""
+    _stub_config(monkeypatch)
     _quiet_tables(monkeypatch)
 
     async def scenario() -> None:
@@ -358,6 +380,7 @@ def test_tui_run_refreshes_job_in_job_view(monkeypatch):
 
 def test_tui_switching_mode_drops_the_other_backends_listings(monkeypatch):
     """A job id from local mode must not be re-read against enterprise."""
+    _stub_config(monkeypatch)
     table_refreshes = _quiet_tables(monkeypatch)
     job_refreshes = _quiet_jobs(monkeypatch)
 
@@ -402,6 +425,7 @@ def test_tui_switching_mode_drops_the_other_backends_listings(monkeypatch):
 
 def test_tui_late_read_from_the_previous_backend_is_dropped(monkeypatch):
     """A result in flight when the target changes never reaches the pane."""
+    _stub_config(monkeypatch)
     _quiet_tables(monkeypatch)
 
     async def scenario() -> None:
