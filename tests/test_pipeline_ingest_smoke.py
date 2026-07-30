@@ -15,7 +15,12 @@ from _fakes import FakeConn, FakeTable
 from click.testing import CliRunner
 from typer.testing import CliRunner as TyperCliRunner
 
+from geneva_examples.core.common import OPT_STABLE_ROW_IDS
 from geneva_examples.examples import cli
+
+# Every ingested table is a potential chunker materialized-view source, and stable
+# row IDs cannot be added after creation -- so each ingest CLI must ask for them.
+_STABLE_ROW_ID_OPTIONS = {OPT_STABLE_ROW_IDS: "true"}
 
 
 def test_ingest_images_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -34,6 +39,7 @@ def test_ingest_images_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None
     assert "images" in conn.created  # created the default table
     assert "images" in conn.dropped  # overwrite=True dropped it first
     assert len(conn.created["images"].adds) == 2  # batches[1:] appended
+    assert conn.create_kwargs["images"]["storage_options"] == _STABLE_ROW_ID_OPTIONS
 
 
 def test_ingest_images_raises_when_no_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,6 +72,7 @@ def test_ingest_videos_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None
     assert result.exit_code == 0, result.output
     assert "videos" in conn.created
     assert len(conn.created["videos"].adds) == 1
+    assert conn.create_kwargs["videos"]["storage_options"] == _STABLE_ROW_ID_OPTIONS
 
 
 def test_ingest_pdfs_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,6 +91,7 @@ def test_ingest_pdfs_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert "pdfs" in conn.created
+    assert conn.create_kwargs["pdfs"]["storage_options"] == _STABLE_ROW_ID_OPTIONS
 
 
 def test_cleanup_drops_tables_and_mv_siblings(monkeypatch: pytest.MonkeyPatch) -> None:
