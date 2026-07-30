@@ -47,6 +47,7 @@ class FakeTable:
         self.dropped: list[str] = []
         self.adds: list[Any] = []  # record batches appended via add()
         self.wheres: list[str] = []  # filters applied via search().where()
+        self.list_data: list[dict] = []  # rows returned by to_list()
 
     def add(self, data: Any) -> None:
         self.adds.append(data)
@@ -89,7 +90,7 @@ class FakeTable:
         return self
 
     def to_list(self) -> list[dict[str, Any]]:
-        return []
+        return list(self.list_data)
 
 
 class FakeConn:
