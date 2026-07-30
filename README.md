@@ -248,7 +248,11 @@ A Textual app to browse, describe, tune, and run every example without
 remembering command names. The left nav has three sections — **Tables**,
 **Jobs**, and **Examples** — and the app opens on Tables:
 
-- **controls** — mode (local/enterprise), config path, db-uri, log level;
+- **controls** — mode (local/enterprise), config path, db-uri, log level. These
+  choose the database, and the header names the one you are on. Changing any of
+  them clears the Tables/Jobs listings and re-lists the section you are in: a
+  job id from local mode doesn't exist on the cluster, so carrying the old
+  listing across a switch would only offer you reads that fail.
 - **Examples** — a tree of examples → steps (from the registry). The pane shows
   the selected step's description (with GPU / prerequisite hints), a form of its
   tunable parameters (defaults from the spec), and a live log pane; press **Run**

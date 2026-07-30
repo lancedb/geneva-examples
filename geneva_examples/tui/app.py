@@ -19,6 +19,12 @@ real stdout file descriptor, which Textual's captured stdout doesn't provide.
 Output is streamed via a thread-safe queue drained by a UI timer, so the reader
 thread never blocks the event loop. Table and job reads (a plain Lance scan or a
 history lookup, no Ray) run in a worker thread and post a single update back.
+
+Table names and job ids are scoped to one database, so the mode/config/db_uri
+controls define which database everything on screen came from. Changing any of
+them retargets the app: the listings are dropped, in-flight reads from the old
+backend are discarded on arrival (see ``_retarget`` and ``_post``), and the
+header names the backend now selected.
 """
 
 from __future__ import annotations
@@ -88,6 +94,17 @@ _SYSTEM_TABLES = {
 
 _DETAIL_PLACEHOLDER = "select a cell to see its full value"
 _JOB_PLACEHOLDER = "select a job on the left (press [b]j[/b] to list them)"
+_TABLE_PLACEHOLDER = "select a table on the left (press [b]t[/b] to list them)"
+
+
+def _target_label(cfg) -> str:
+    """Which database ``cfg`` points at — for messages that name the backend.
+
+    Mode-aware on purpose: ``db_uri`` is meaningless on the local backend (it
+    connects to ``local_db_path``), so reporting it there would name a database
+    the read never touched.
+    """
+    return str(cfg.local_db_path if cfg.is_local else cfg.db_uri)
 
 
 def _detail_text(value) -> str:
@@ -204,6 +221,11 @@ class GenevaTUI(App):
         self._current_job_terminal = True
         self._following = False
         self._follow_timer = None
+        # Which database the panes were read from, and a counter bumped every
+        # time that changes. Matches the control defaults in compose() so the
+        # initial Select.Changed doesn't read as a retarget.
+        self._target: tuple[str, str, str] = ("local", "", "")
+        self._epoch = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -228,7 +250,7 @@ class GenevaTUI(App):
                         yield VerticalScroll(id="form")
                         yield RichLog(id="log", highlight=True, markup=True, wrap=True)
                     with Vertical(id="table-pane"):
-                        yield Static("Select a table on the left.", id="table-info")
+                        yield Static(_TABLE_PLACEHOLDER, id="table-info")
                         yield Input(
                             placeholder=(
                                 "filter: job_id contains …  (Enter to apply; "
@@ -249,6 +271,8 @@ class GenevaTUI(App):
         # Drain queued log lines onto the RichLog on the UI thread (10 Hz).
         self.set_interval(0.1, self._drain_log)
         self._sync_db_uri_visibility()
+        self._target = self._target_key()
+        self._show_target()
         tree = self.query_one("#nav", Tree)
         tree.show_root = False
         tree.root.expand()
@@ -278,7 +302,7 @@ class GenevaTUI(App):
             await self._select(*first)
         # …but land on the Tables view with a fresh listing: inspecting data
         # is the primary entry point; the run pane is one step-click away.
-        self._list_tables(self._build_cfg())
+        self._refresh_tables()
 
     # --- selection --------------------------------------------------------
 
@@ -306,28 +330,17 @@ class GenevaTUI(App):
                 f"# {ex.title}\n\n{ex.description}"
             )
         elif kind == "jobs-refresh":
-            self._list_jobs(self._build_cfg())
+            self._refresh_jobs()
         elif kind == "job":
             switcher.current = "job-pane"
             run_button.label = "Refresh ⟳"
             self._select_job(data[1])
         elif kind == "tables-refresh":
-            self._list_tables(self._build_cfg())
+            self._refresh_tables()
         elif kind == "table":
             switcher.current = "table-pane"
             run_button.label = "Refresh ⟳"
-            self._current_table = data[1]
-            self._current_table_system = len(data) > 2 and bool(data[2])
-            # System tables (geneva_jobs / geneva_errors) carry a job_id
-            # column, so they get the job_id filter box; plain tables don't.
-            self.query_one("#table-filter", Input).display = self._current_table_system
-            self.query_one("#table-info", Static).update(f"loading {data[1]}…")
-            self._load_table(
-                self._build_cfg(),
-                data[1],
-                self._current_table_system,
-                self._job_id_filter(),
-            )
+            self._open_table(data[1], len(data) > 2 and bool(data[2]), "loading")
 
     async def _select(self, example: Example, step: Step) -> None:
         self._current = (example, step)
@@ -367,9 +380,98 @@ class GenevaTUI(App):
         if widgets:
             await form.mount(*widgets)  # type: ignore[arg-type]
 
+    # --- connection target ------------------------------------------------
+
     @on(Select.Changed, "#mode")
     def _on_mode_changed(self, _event: Select.Changed) -> None:
         self._sync_db_uri_visibility()
+        if self._retarget():
+            # Picking a mode is a finished choice, so the section being browsed
+            # is re-listed against the new backend straight away.
+            self._refresh_browsed_section()
+
+    @on(Input.Changed, "#config")
+    @on(Input.Changed, "#db_uri")
+    def _on_target_input_changed(self, _event: Input.Changed) -> None:
+        # Half-typed text is not a finished choice: forget the old backend's
+        # listings, but don't open a connection on every keystroke. Enter does
+        # that, below.
+        self._retarget()
+
+    @on(Input.Submitted, "#config")
+    @on(Input.Submitted, "#db_uri")
+    def _on_target_input_submitted(self, _event: Input.Submitted) -> None:
+        self._retarget()
+        self._refresh_browsed_section()
+
+    def _refresh_browsed_section(self) -> None:
+        """List whichever section is on screen for the newly selected backend.
+
+        Switching backends while reading job records means you want *that*
+        backend's jobs; anywhere else, tables — the view the app opens on.
+        """
+        if self.query_one("#main", ContentSwitcher).current == "job-pane":
+            self._refresh_jobs()
+        else:
+            self._refresh_tables()
+
+    def _target_key(self) -> tuple[str, str, str]:
+        """Identity of the database the controls currently point at."""
+        return (
+            str(self.query_one("#mode", Select).value),
+            self.query_one("#config", Input).value.strip(),
+            self._db_uri_override() or "",
+        )
+
+    def _retarget(self) -> bool:
+        """Notice a change of backend; return whether one happened.
+
+        Table names and job ids belong to a single database, so once the target
+        moves everything on screen describes somewhere else — re-reading a job
+        id listed under local mode against the enterprise cluster just fails
+        with "not found". Rather than let that stale state be acted on, the
+        listings are dropped and the reads still in flight are marked stale.
+        """
+        key = self._target_key()
+        if key == self._target:
+            return False
+        self._target = key
+        self._epoch += 1
+        self._forget_browsed()
+        self._show_target()
+        return True
+
+    def _show_target(self) -> None:
+        """Name the selected backend in the header, so it is never a guess."""
+        mode, config, db_uri = self._target
+        self.sub_title = " · ".join(p for p in (mode, db_uri, config) if p)
+
+    def _forget_browsed(self) -> None:
+        """Reset the nav sections and viewer panes to "nothing read yet"."""
+        self._stop_follow()
+        self._current_job = None
+        self._current_job_terminal = True
+        self._current_table = None
+        self._current_table_system = False
+        self._table_cols, self._table_rows = [], []
+        self._reset_section(self._tables_node, "tables-refresh")
+        self._reset_section(self._jobs_node, "jobs-refresh", label="Jobs")
+        self.query_one("#table-filter", Input).display = False
+        self.query_one("#table-info", Static).update(_TABLE_PLACEHOLDER)
+        self.query_one("#table-view", DataTable).clear(columns=True)
+        self.query_one("#cell-value", Static).update(_DETAIL_PLACEHOLDER)
+        self.query_one("#job-info", Static).update(_JOB_PLACEHOLDER)
+        self.query_one("#job-detail-value", Static).update("")
+
+    def _post(self, epoch: int, callback, *args) -> None:
+        """Hand a worker's result to the UI unless the target moved under it.
+
+        A read holds the config it was started with, so a result arriving after
+        a retarget describes the previous database. Dropping it here keeps a
+        slow local scan from repainting the pane after a switch to enterprise.
+        """
+        if epoch == self._epoch:
+            self.call_from_thread(callback, *args)
 
     def _sync_db_uri_visibility(self) -> None:
         """Show the db_uri field only on the backend that reads it.
@@ -399,10 +501,46 @@ class GenevaTUI(App):
             db_uri_override=self._db_uri_override(),
         )
 
+    def _cfg(self):
+        """``(config, None)`` from the controls, or ``(None, message)``.
+
+        ``load_config`` rejects a target it can't use — enterprise mode with no
+        config.yaml, or one missing credentials — and selecting a mode this
+        machine isn't set up for is an ordinary thing to do in a mode switcher.
+        The complaint belongs on the pane the user is looking at, not in a
+        crash dialog, so callers render it where the result would have gone.
+        """
+        try:
+            return self._build_cfg(), None
+        except Exception as exc:  # noqa: BLE001 - surface to the caller's pane
+            return None, f"{type(exc).__name__}: {exc}"
+
     # --- table viewer -----------------------------------------------------
 
     def action_refresh_tables(self) -> None:
-        self._list_tables(self._build_cfg())
+        self._refresh_tables()
+
+    def _refresh_tables(self) -> None:
+        """List the current backend's tables into the nav."""
+        cfg, err = self._cfg()
+        if err:
+            self._set_table_names([], [], err)
+        else:
+            self._list_tables(cfg, self._epoch)
+
+    def _open_table(self, name: str, system: bool, note: str) -> None:
+        """Show one table, loading its rows in the background."""
+        self._current_table = name
+        self._current_table_system = system
+        # System tables (geneva_jobs / geneva_errors) carry a job_id column, so
+        # they get the job_id filter box; plain tables don't.
+        self.query_one("#table-filter", Input).display = system
+        cfg, err = self._cfg()
+        if err:
+            self._show_table(name, [], [], 0, err)
+            return
+        self.query_one("#table-info", Static).update(f"{note} {name}…")
+        self._load_table(cfg, name, system, self._job_id_filter(), self._epoch)
 
     def _job_id_filter(self) -> str | None:
         """The job_id filter value — only meaningful on system tables."""
@@ -413,18 +551,10 @@ class GenevaTUI(App):
     @on(Input.Submitted, "#table-filter")
     def _on_filter_submitted(self, _event: Input.Submitted) -> None:
         if self._current_table and self._current_table_system:
-            self.query_one("#table-info", Static).update(
-                f"filtering {self._current_table}…"
-            )
-            self._load_table(
-                self._build_cfg(),
-                self._current_table,
-                True,
-                self._job_id_filter(),
-            )
+            self._open_table(self._current_table, True, "filtering")
 
     @work(thread=True, group="viewer", exclusive=True)
-    def _list_tables(self, cfg) -> None:
+    def _list_tables(self, cfg, epoch: int = 0) -> None:
         try:
             conn = connect(cfg)
             names = sorted(conn.table_names())
@@ -441,7 +571,17 @@ class GenevaTUI(App):
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the tree
             names, system, err = [], [], f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._set_table_names, names, system, err)
+        self._post(epoch, self._set_table_names, names, system, err)
+
+    def _reset_section(self, node, kind: str, label: str | None = None) -> None:
+        """Empty a nav section back to just its refresh leaf."""
+        if node is None:
+            return
+        node.remove_children()
+        if label is not None:
+            node.set_label(label)
+        node.add_leaf("↻ refresh", data=(kind,))
+        node.expand()
 
     def _set_table_names(
         self, names: list[str], system: list[str], err: str | None
@@ -449,8 +589,7 @@ class GenevaTUI(App):
         node = self._tables_node
         if node is None:
             return
-        node.remove_children()
-        node.add_leaf("↻ refresh", data=("tables-refresh",))
+        self._reset_section(node, "tables-refresh")
         if err:
             node.add_leaf(f"⚠ {err[:48]}", data=None)
         elif not names and not system:
@@ -469,6 +608,7 @@ class GenevaTUI(App):
         name: str,
         system: bool = False,
         job_id: str | None = None,
+        epoch: int = 0,
     ) -> None:
         # job_id values are hex/uuid strings; drop quotes rather than trying
         # to escape them so the predicate below can't be broken open. Partial
@@ -501,8 +641,8 @@ class GenevaTUI(App):
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             cols, rows, total, err = [], [], 0, f"{type(exc).__name__}: {exc}"
             ts_col = None
-        self.call_from_thread(
-            self._show_table, name, cols, rows, total, err, where, bool(ts_col)
+        self._post(
+            epoch, self._show_table, name, cols, rows, total, err, where, bool(ts_col)
         )
 
     def _show_table(
@@ -560,10 +700,18 @@ class GenevaTUI(App):
     # --- jobs viewer ------------------------------------------------------
 
     def action_refresh_jobs(self) -> None:
-        self._list_jobs(self._build_cfg())
+        self._refresh_jobs()
+
+    def _refresh_jobs(self) -> None:
+        """List the current backend's jobs into the nav."""
+        cfg, err = self._cfg()
+        if err:
+            self._set_jobs([], "", err)
+        else:
+            self._list_jobs(cfg, self._epoch)
 
     @work(thread=True, group="viewer", exclusive=True)
-    def _list_jobs(self, cfg) -> None:
+    def _list_jobs(self, cfg, epoch: int = 0) -> None:
         try:
             conn = connect(cfg)
             # Every status, not just the active ones the CLI defaults to: in a
@@ -585,7 +733,7 @@ class GenevaTUI(App):
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the tree
             rows, tally, err = [], "", f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._set_jobs, rows, tally, err)
+        self._post(epoch, self._set_jobs, rows, tally, err)
 
     def _set_jobs(
         self, rows: list[tuple[str, str]], tally: str, err: str | None
@@ -593,9 +741,9 @@ class GenevaTUI(App):
         node = self._jobs_node
         if node is None:
             return
-        node.remove_children()
-        node.set_label(f"Jobs — {tally}" if tally else "Jobs")
-        node.add_leaf("↻ refresh", data=("jobs-refresh",))
+        self._reset_section(
+            node, "jobs-refresh", f"Jobs — {tally}" if tally else "Jobs"
+        )
         if err:
             node.add_leaf(f"⚠ {err[:48]}", data=None)
         elif not rows:
@@ -608,11 +756,15 @@ class GenevaTUI(App):
     def _select_job(self, job_id: str) -> None:
         """Show one job's record, loading it in the background."""
         self._current_job = job_id
+        cfg, err = self._cfg()
+        if err:
+            self._show_job(job_id, None, "", True, err)
+            return
         self.query_one("#job-info", Static).update(f"loading job {job_id}…")
-        self._load_job(self._build_cfg(), job_id)
+        self._load_job(cfg, job_id, self._epoch)
 
     @work(thread=True, group="viewer", exclusive=True)
-    def _load_job(self, cfg, job_id: str) -> None:
+    def _load_job(self, cfg, job_id: str, epoch: int = 0) -> None:
         try:
             conn = connect(cfg)
             jr = conn.get_job(job_id)
@@ -624,11 +776,14 @@ class GenevaTUI(App):
             terminal = status in TERMINAL_STATUSES
             err = None
         except ValueError:  # geneva raises this for an unknown id
-            summary, detail, terminal, err = None, "", True, "not found"
+            # Name the database: the usual way to get here is an id belonging
+            # to the other mode's database, not a job that never existed.
+            summary, detail, terminal = None, "", True
+            err = f"no such job in the {cfg.mode} database {_target_label(cfg)}"
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             summary, detail, terminal = None, "", True
             err = f"{type(exc).__name__}: {exc}"
-        self.call_from_thread(self._show_job, job_id, summary, detail, terminal, err)
+        self._post(epoch, self._show_job, job_id, summary, detail, terminal, err)
 
     def _show_job(
         self,
@@ -703,8 +858,14 @@ class GenevaTUI(App):
             self._follow_timer = None
 
     def _poll_job(self) -> None:
-        if self._following and self._current_job:
-            self._load_job(self._build_cfg(), self._current_job)
+        if not (self._following and self._current_job):
+            return
+        cfg, err = self._cfg()
+        if err:
+            # _show_job stops the follow, so a broken target can't keep polling.
+            self._show_job(self._current_job, None, "", True, err)
+            return
+        self._load_job(cfg, self._current_job, self._epoch)
 
     # --- running ----------------------------------------------------------
 
@@ -735,23 +896,21 @@ class GenevaTUI(App):
         # In the Tables/Jobs views the primary action re-queries what is on
         # screen rather than running a step's UDF.
         pane = self.query_one("#main", ContentSwitcher).current
+        # With nothing selected — the state a retarget leaves behind — it
+        # re-lists the section instead, so one press always does something.
         if pane == "job-pane":
             if self._current_job:
                 self._select_job(self._current_job)
             else:
-                self._list_jobs(self._build_cfg())
+                self._refresh_jobs()
             return
         if pane == "table-pane":
             if self._current_table:
-                self.query_one("#table-info", Static).update(
-                    f"refreshing {self._current_table}…"
+                self._open_table(
+                    self._current_table, self._current_table_system, "refreshing"
                 )
-                self._load_table(
-                    self._build_cfg(),
-                    self._current_table,
-                    self._current_table_system,
-                    self._job_id_filter(),
-                )
+            else:
+                self._refresh_tables()
             return
         if self._current is None:
             return

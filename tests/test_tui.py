@@ -26,7 +26,16 @@ def _quiet_tables(monkeypatch) -> list:
     """No-op the startup/manual tables refresh; returns the call log."""
     calls: list = []
     monkeypatch.setattr(
-        GenevaTUI, "_list_tables", lambda self, cfg=None: calls.append(cfg)
+        GenevaTUI, "_list_tables", lambda self, cfg=None, epoch=0: calls.append(cfg)
+    )
+    return calls
+
+
+def _quiet_jobs(monkeypatch) -> list:
+    """No-op the jobs listing (it would open a connection); returns the log."""
+    calls: list = []
+    monkeypatch.setattr(
+        GenevaTUI, "_list_jobs", lambda self, cfg=None, epoch=0: calls.append(cfg)
     )
     return calls
 
@@ -161,7 +170,7 @@ def test_tui_run_refreshes_table_in_table_view(monkeypatch):
         ran: list = []
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._load_table = lambda cfg, name, system=False, job_id=None: (
+            app._load_table = lambda cfg, name, system=False, job_id=None, epoch=0: (
                 loaded.append(name)
             )
             app._run_step = lambda step, argv: ran.append(step)
@@ -302,7 +311,7 @@ def test_tui_follow_stops_when_job_reaches_terminal_state(monkeypatch):
         app = GenevaTUI()
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._load_job = lambda cfg, job_id: None  # no connection in tests
+            app._load_job = lambda cfg, job_id, epoch=0: None  # no connection here
             app.query_one("#main", ContentSwitcher).current = "job-pane"
             app._current_job = "j-1"
             app._current_job_terminal = False
@@ -335,7 +344,7 @@ def test_tui_run_refreshes_job_in_job_view(monkeypatch):
         ran: list = []
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._load_job = lambda cfg, job_id: loaded.append(job_id)
+            app._load_job = lambda cfg, job_id, epoch=0: loaded.append(job_id)
             app._run_step = lambda step, argv: ran.append(step)
             app.query_one("#main").current = "job-pane"
             app._current_job = "j-7"
@@ -343,6 +352,114 @@ def test_tui_run_refreshes_job_in_job_view(monkeypatch):
             await pilot.pause()
         assert loaded == ["j-7"]
         assert ran == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_switching_mode_drops_the_other_backends_listings(monkeypatch):
+    """A job id from local mode must not be re-read against enterprise."""
+    table_refreshes = _quiet_tables(monkeypatch)
+    job_refreshes = _quiet_jobs(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # browsing local: a job listed, selected, and being followed
+            app._load_job = lambda cfg, job_id, epoch=0: None
+            app._set_jobs(
+                [("j-local", "RUNNING   j-local   images")], "1 RUNNING", None
+            )
+            app._set_table_names(["images"], ["geneva_jobs"], None)
+            app.query_one("#main", ContentSwitcher).current = "job-pane"
+            app._current_job = "j-local"
+            app._current_job_terminal = False
+            app._current_table = "images"
+            app.action_toggle_follow()
+            await pilot.pause()
+            assert app._following
+
+            app.query_one("#mode", Select).value = "enterprise"
+            await pilot.pause()
+
+            # nothing from the local database survives the switch
+            assert app._current_job is None
+            assert app._current_table is None
+            assert not app._following  # and no poll against the new backend
+            tree = app.query_one("#nav", Tree)
+            tables_node, jobs_node = tree.root.children[0], tree.root.children[1]
+            assert [n.label.plain for n in tables_node.children] == ["↻ refresh"]
+            assert [n.label.plain for n in jobs_node.children] == ["↻ refresh"]
+            assert jobs_node.label.plain == "Jobs"  # stale tally dropped too
+            assert "enterprise" in app.sub_title  # header names the new backend
+            # switching while reading jobs re-lists jobs for the new backend,
+            # so the tables listing is still just the one from startup
+            assert len(job_refreshes) == 1
+            assert len(table_refreshes) == 1
+
+    asyncio.run(scenario())
+
+
+def test_tui_late_read_from_the_previous_backend_is_dropped(monkeypatch):
+    """A result in flight when the target changes never reaches the pane."""
+    _quiet_tables(monkeypatch)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            epoch = app._epoch
+            app.query_one("#mode", Select).value = "enterprise"
+            await pilot.pause()
+
+            # the local read finishes now, stamped with the epoch it started in
+            # (posted from a thread, the way a worker delivers its result)
+            rows = [("j-1", "DONE      j-1       images")]
+            await asyncio.to_thread(
+                app._post, epoch, app._set_jobs, rows, "1 DONE", None
+            )
+            await pilot.pause()
+            jobs_node = app.query_one("#nav", Tree).root.children[1]
+            assert [n.label.plain for n in jobs_node.children] == ["↻ refresh"]
+
+            # a read started after the switch still lands
+            rows = [("j-2", "DONE      j-2       pdfs")]
+            await asyncio.to_thread(
+                app._post, app._epoch, app._set_jobs, rows, "", None
+            )
+            await pilot.pause()
+            assert len(jobs_node.children) == 2
+
+    asyncio.run(scenario())
+
+
+def test_tui_unusable_target_reports_instead_of_crashing(monkeypatch):
+    """Enterprise mode without a config is a message, not a crash dialog."""
+    _quiet_tables(monkeypatch)
+
+    from geneva_examples.tui import app as tui_app
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("config file not found: config.yaml")
+
+    monkeypatch.setattr(tui_app, "load_config", boom)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._refresh_jobs()
+            await pilot.pause()
+            jobs_node = app.query_one("#nav", Tree).root.children[1]
+            labels = [n.label.plain for n in jobs_node.children]
+            assert any("config file not found" in label for label in labels)
+
+            # and the same error reaches the pane a job would have loaded into
+            app.query_one("#main", ContentSwitcher).current = "job-pane"
+            app._select_job("j-1")
+            await pilot.pause()
+            info = str(app.query_one("#job-info", Static)._content)
+            assert "config file not found" in info
 
     asyncio.run(scenario())
 
