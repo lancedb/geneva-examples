@@ -97,13 +97,15 @@ def test_backfill_column_local_uses_native_kwargs():
     table = _Table(["video_id", "embedding"])
     _run(table, is_remote=False)
     bf = table.calls["backfill"]
-    # Local (NativeTable) backfill drops task_size/use_cpu_only_pool and maps
-    # checkpoint_size -> max_checkpoint_size.
+    # Local backfill maps checkpoint_size -> max_checkpoint_size and drops the
+    # remote-only worker-pool routing.
     assert bf["max_checkpoint_size"] == 4096
     assert bf["_admission_check"] is False
-    assert "task_size" not in bf
     assert "use_cpu_only_pool" not in bf
     assert "checkpoint_size" not in bf
+    # ...but task_size IS forwarded: it is read-task planning, honored by local
+    # Ray too. Dropping it silently ignored --task-size on every local run.
+    assert bf["task_size"] == 4096
     # Local concurrency is capped to the machine's core count.
     assert bf["concurrency"] <= 16
     assert bf["batch_checkpoint_flush_interval_seconds"] == 2.0

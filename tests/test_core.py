@@ -178,6 +178,47 @@ def test_runtime_session_local_verbose_in_debug(monkeypatch):
     common.setup_logging("INFO")  # restore for other tests
 
 
+def test_runtime_session_falls_back_to_public_api(monkeypatch):
+    """If geneva's internal ray_cluster goes away, degrade — don't crash.
+
+    The private import is the quiet-logging path; a geneva pin that renames it
+    must still leave local runs working via the public context manager.
+    """
+    import contextlib
+
+    import geneva.runners.ray._mgr as mgr
+
+    def _boom(**_kwargs):
+        raise AttributeError("ray_cluster moved")
+
+    monkeypatch.setattr(mgr, "ray_cluster", _boom)
+
+    used: dict = {}
+
+    class _Conn:
+        def local_ray_context(self):
+            used["public"] = True
+            return contextlib.nullcontext()
+
+    with common.runtime_session(_Conn(), Config(mode="local")):
+        pass
+
+    assert used == {"public": True}
+
+
+def test_resolve_resources_local_without_ram_reading(monkeypatch):
+    """A platform where total RAM is unreadable still clamps CPU/GPU."""
+    monkeypatch.setattr(common, "total_ram_bytes", lambda: None)
+
+    cpus, gpus, memory = common.resolve_resources(
+        Config(mode="local"), num_cpus=999, num_gpus=1, memory_gib=8
+    )
+
+    assert gpus == 0  # local Ray has no GPU to schedule against
+    assert cpus <= (os.cpu_count() or 1)
+    assert memory == common.memory_request_bytes(8)  # left as requested
+
+
 def test_connect_local_uses_path(monkeypatch):
     captured = {}
 
@@ -196,8 +237,91 @@ def test_connect_local_uses_path(monkeypatch):
     assert "api_key" not in captured  # no cloud creds in local mode
 
 
+def test_connect_enterprise_passes_cloud_credentials(monkeypatch):
+    captured = {}
+
+    class _FakeGeneva:
+        def connect(self, **kwargs):
+            captured.update(kwargs)
+            return "conn"
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "geneva", _FakeGeneva())
+    common.connect(
+        Config(
+            mode="enterprise",
+            db_uri="db://prod",
+            geneva_host="http://host",
+            lancedb_api_key="key",
+            lancedb_region="us-east-1",
+        )
+    )
+
+    # The uri goes through as the db:// URI, not a Path — that distinction is
+    # what selects geneva's remote connection over an on-disk database.
+    assert captured["uri"] == "db://prod"
+    assert captured["host_override"] == "http://host"
+    assert captured["api_key"] == "key"
+    assert captured["region"] == "us-east-1"
+
+
+def test_build_manifest_builds_a_pinned_manifest_in_enterprise(monkeypatch):
+    import sys
+    import types as _types
+
+    built: dict = {}
+
+    class _Manifest:
+        @classmethod
+        def create_pip(cls, name):
+            built["name"] = name
+            return cls()
+
+        def pip(self, specs):
+            built["pip"] = specs
+            return self
+
+        def build(self):
+            built["built"] = True
+            return "manifest"
+
+    module = _types.ModuleType("geneva.manifest")
+    module.GenevaManifest = _Manifest
+    monkeypatch.setitem(sys.modules, "geneva.manifest", module)
+
+    out = common.build_manifest(Config(mode="enterprise"), "vid", ["pkg==1"])
+
+    assert out == "manifest"
+    assert built["pip"] == ["pkg==1"]
+    assert built["built"] is True
+    # the prefix gets a random suffix so repeat runs don't collide
+    assert built["name"].startswith("vid-") and len(built["name"]) > len("vid-")
+
+
 def test_retry_io_returns_on_first_success():
     assert retry.retry_io("op", lambda: 42) == 42
+
+
+def test_retry_io_without_jitter_sleeps_exact_backoff(monkeypatch):
+    slept: list[float] = []
+    monkeypatch.setattr(retry.time, "sleep", slept.append)
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("transient")
+        return "ok"
+
+    # jitter=0 -> the backoff is exactly sleep_s * attempt, no randomization
+    assert retry.retry_io("op", flaky, attempts=5, sleep_s=2, jitter=0) == "ok"
+    assert slept == [2, 4]
+
+
+def test_retry_io_with_zero_attempts_returns_none():
+    # Degenerate but defined: the loop body never runs, nothing is raised.
+    assert retry.retry_io("op", lambda: 42, attempts=0) is None
 
 
 def test_retry_io_retries_then_succeeds(monkeypatch):
@@ -290,3 +414,14 @@ def test_format_cell_bounds_long_and_multiline_values():
     assert len(out) == 120
     assert out.endswith("…")
     assert common.format_cell("short") == "short"
+
+
+def test_format_cell_summarizes_opaque_values():
+    """The grid must stay one line per cell whatever geneva hands back."""
+    assert common.format_cell(None) == ""
+    assert common.format_cell(b"\x00\x01\x02") == "<3 B>"
+    assert common.format_cell(3.14159) == "3.142"
+    assert common.format_cell([0.1] * 512) == "[512 floats]"
+    assert common.format_cell(["a"] * 20) == "[20 items]"  # long, not numeric
+    assert common.format_cell([1, 2, 3]) == "[1, 2, 3]"  # short enough to show
+    assert common.format_cell({"w": 640, "h": 480}) == "w=640 h=480"

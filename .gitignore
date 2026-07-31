@@ -8,10 +8,27 @@ config.*.yaml
 !config-example*.yaml
 # local-mode on-disk Lance database (geneva.connect against a Path)
 local_db/
+# Scratch root for ad-hoc local databases — point --db-uri/local_db_path here
+# (e.g. `--db-uri .geneva/smoke`) to keep them out of the repo root entirely.
+.geneva/
 # local MP4 download cache (ingest-videos)
 video_cache/
 # local PDF ingest directory (ingest-pdfs --pdf-dir default)
 pdf_data/
+
+# Stray local databases at the repo root. Any geneva connect whose uri is NOT
+# `db://…` is an on-disk database, created relative to the working directory —
+# so a bare `--db-uri smoke` (or a db_uri that lost its scheme) leaves a
+# `./smoke/` behind holding `__manifest/` + `…___system$geneva_jobs/`. The name
+# comes from your own config.yaml, which is itself gitignored, so these can't be
+# listed here by name; match the two marker directories every such database
+# contains instead. That leaves the parent with no tracked files, which git
+# then does not report at all.
+/*/__manifest/
+/*/*___system$*/
+
+# Standalone Lance datasets left by ad-hoc scripts and reproductions.
+*.lance/
 
 # UDF Studio sample data: keep the directory layout, ignore user-provided media.
 studio_data/images/*

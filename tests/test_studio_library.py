@@ -37,6 +37,12 @@ def test_delete(library_path: Path):
     assert [r["name"] for r in library.list_udfs(library_path)] == ["b"]
 
 
+def test_delete_before_any_save_is_a_noop(library_path: Path):
+    """Deleting from a library with no table yet must not raise."""
+    library.delete_udf(library_path, "never-existed")
+    assert library.list_udfs(library_path) == []
+
+
 def test_list_empty_before_any_save(library_path: Path):
     assert library.list_udfs(library_path) == []
 

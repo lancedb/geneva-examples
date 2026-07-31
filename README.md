@@ -24,7 +24,8 @@ What's here:
    - shared model UDFs (OpenCLIP, BLIP) live in
      [`examples/_shared/`](geneva_examples/examples/_shared/)
 2. **A Textual TUI** (`uv run tui`) that lists the examples, shows each step's
-   description, renders a parameter form, and runs it with live logs.
+   description, renders a parameter form, and runs it with live logs — plus
+   read-only **Tables** and **Jobs** browsers for inspecting the result.
 3. **Generated CLIs** — every step is also a `uv run <name>` command, generated
    from the same spec (one source of truth for params + descriptions).
 4. **Two inspection CLIs** — `stats` and `jobs` — plus `cleanup`, that read/manage
@@ -101,6 +102,7 @@ geneva-examples/
 │   │   ├── config.py                 # load config.yaml -> Config (mode, creds, db_uri, S3)
 │   │   ├── common.py                 # connect(), runtime_session, build_manifest, resolve_resources
 │   │   ├── backfill.py               # backfill_column(): shared drop/add/wait/backfill flow
+│   │   ├── jobs.py                   # read/format Geneva job records (shared by the jobs CLI + TUI)
 │   │   ├── spec.py                   # Param/Step/Example + build_command() CLI generator
 │   │   ├── package_specs.py          # resolve remote-runtime pip pins from installed versions
 │   │   ├── _types.py                 # structural Protocols for the Geneva/LanceDB objects
@@ -112,7 +114,7 @@ geneva-examples/
 │   │   ├── images/                   # __init__ (spec) + imageinfo + ingest/lightweight/embed/caption
 │   │   ├── video/                    # spec + chunkers (bytes/blob/URI) + ingest/chunk (+ openvid/external) + frame-*/seed
 │   │   └── pdf/                      # spec + document UDFs + ingest/chunk
-│   ├── tui/                          # Textual TUI (app.py) + form helpers (forms.py)
+│   ├── tui/                          # Textual TUI: Tables/Jobs/Examples nav (app.py) + form helpers (forms.py)
 │   ├── ops/                          # inspection/teardown CLIs: stats, jobs, cleanup
 │   └── apps/                         # local (non-cluster) apps
 │       ├── udf_studio.py             # Gradio prototyping app (Typer entrypoint + UI)
@@ -222,7 +224,7 @@ option.
 | `lancedb_api_key` | enterprise only | —                 | LanceDB Enterprise API key.                   |
 | `lancedb_region`  | enterprise only | —                 | LanceDB Enterprise region.                     |
 | `geneva_host`     | enterprise only | —                 | Reachable Geneva runtime URL (load balancer). |
-| `db_uri`          | no              | `db://quickstart` | Database URI (enterprise); ignored locally.   |
+| `db_uri`          | no              | `db://quickstart` | Database URI (enterprise); ignored locally. geneva reads any uri *without* a `db://` scheme as an **on-disk** database created next to wherever you ran the command (`smoke` → `./smoke/`), so a scheme-less name is auto-corrected to `db://<name>` with a warning rather than silently connecting you to a local directory. Object-store uris (`s3://`, `gs://`, `az://`) and explicit paths are passed through untouched — for a deliberate scratch database use a subdir like `./.geneva/smoke` (`.geneva/` is gitignored). |
 | `s3_*`            | no              | —                 | **Storage-bucket** creds (all four or none): the connection's `storage_options` for the LanceDB data files. |
 | `assets_s3_*`     | no              | —                 | **Assets-bucket** creds (all four or none): a separate token for the raw-video bucket used by the external-refs video steps (override with `--video-*`). Neither set falls back to the other. |
 | `aws_allow_http`  | no              | `false`           | Allow plain-HTTP object storage (e.g. MinIO) for the connection's `storage_options`. |
@@ -243,17 +245,33 @@ uv run tui
 ```
 
 A Textual app to browse, describe, tune, and run every example without
-remembering command names:
+remembering command names. The left nav has three sections — **Tables**,
+**Jobs**, and **Examples** — and the app opens on Tables:
 
-- **left** — a tree of examples → steps (from the registry);
-- **top-right** — the selected step's description (with GPU / prerequisite hints);
-- **middle** — a form of that step's tunable parameters (defaults from the spec);
-- **controls** — mode (local/enterprise), config path, db-uri, log level;
-- **bottom** — a live log pane; press **Run** (or `r`) to execute the step (on
-  local Ray in local mode) and watch it stream.
+- **controls** — mode (local/enterprise), config path, db-uri, log level. These
+  choose the database, and the header names the one you are on. Changing any of
+  them clears the Tables/Jobs listings and re-lists the section you are in: a
+  job id from local mode doesn't exist on the cluster, so carrying the old
+  listing across a switch would only offer you reads that fail.
+- **Examples** — a tree of examples → steps (from the registry). The pane shows
+  the selected step's description (with GPU / prerequisite hints), a form of its
+  tunable parameters (defaults from the spec), and a live log pane; press **Run**
+  (or `r`) to execute the step (on local Ray in local mode) and watch it stream.
+- **Tables** — press `t` to list the database's tables plus Geneva's system
+  tables; selecting one shows a sample of its rows (see
+  [Inspecting state](#inspecting-state)).
+- **Jobs** — press `j` to list recent backfill/refresh jobs, newest first across
+  every status, with a tally (`Jobs — 1 RUNNING · 2 DONE`) on the section header.
+  Selecting one shows its full record: status, target column, elapsed, a
+  progress line (`rows_committed 89/89 (100%)`), the launch config, every metric,
+  and the complete event log — which, since Geneva has no streaming log API, *is*
+  the log. Press `f` to follow a still-running job; it re-reads the record every
+  few seconds and stops on its own once the job is DONE/FAILED/CANCELLED.
 
 Every step is *also* a plain command (below), generated from the same spec — so
-`uv run <name>` and the TUI always agree on parameters and descriptions.
+`uv run <name>` and the TUI always agree on parameters and descriptions. The
+Jobs view reads the same records as `uv run jobs` and renders them identically
+(both call `core/jobs.py`).
 
 ## Image workflow
 
@@ -336,6 +354,9 @@ uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if a
 `stats` defaults to the example tables (`images`, `videos`, `video_clips`) and
 skips any that are absent. Both CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
+
+The TUI's **Jobs** section is the same view without the command names: `uv run
+tui`, press `j`, pick a job. `f` there is the equivalent of `jobs tail`.
 
 ### Debugging demo: generate real errors, analyze them in the table viewer
 

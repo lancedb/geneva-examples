@@ -159,9 +159,7 @@ def run(
 
     import geneva  # noqa: F401  (ensures geneva is importable before connect)
 
-    cfg = load_config(config, mode_override=mode)
-    if db_uri:
-        cfg.db_uri = db_uri
+    cfg = load_config(config, mode_override=mode, db_uri_override=db_uri)
 
     conn = connect(cfg)
 

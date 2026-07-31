@@ -75,6 +75,16 @@ def test_load_hf_image_batches_batches_and_maps_fields(monkeypatch):
     )
 
 
+def test_load_hf_image_batches_no_trailing_partial_when_even(monkeypatch):
+    """A row count that divides evenly must not emit an empty trailing batch."""
+    fake_rows = [{"image": Image.new("RGB", (8, 8)), "label": i} for i in range(4)]
+    monkeypatch.setattr("datasets.load_dataset", lambda name, split: fake_rows)
+
+    batches = images.load_hf_image_batches("ds", "train", num_images=4, frag_size=2)
+
+    assert [b.num_rows for b in batches] == [2, 2]  # exactly two, no empty third
+
+
 # --------------------------------------------------------------------------- #
 # videos.py — download helpers
 # --------------------------------------------------------------------------- #
@@ -182,6 +192,14 @@ def test_normalize_openvid_filters_null_video():
     out = videos.normalize_openvid_reference_batch(batch, skip_null_video=True)
     assert out.num_rows == 1
     assert out.to_pylist()[0]["openvid_rowid"] == 10
+
+
+def test_normalize_openvid_keeps_null_video_when_not_skipping():
+    """Opting out keeps unchunkable rows — the pointer table stays complete."""
+    batch = _openvid_batch([10, 11], [b"blob0", None])
+    out = videos.normalize_openvid_reference_batch(batch, skip_null_video=False)
+    assert out.num_rows == 2
+    assert [r["openvid_rowid"] for r in out.to_pylist()] == [10, 11]
 
 
 def test_normalize_openvid_all_null_returns_empty_typed_batch():

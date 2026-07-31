@@ -95,7 +95,12 @@ LIGHTWEIGHT = Step(
             "Batch checkpoint flush interval (seconds).",
             min=0,
         ),
-        Param("use_cpu_only_pool", bool, True, "Use the CPU-only pool (enterprise)."),
+        Param(
+            "use_cpu_only_pool",
+            bool,
+            True,
+            "Keep this CPU-only step off the GPU nodes (enterprise).",
+        ),
         _WAIT_ATTEMPTS,
         _WAIT_SLEEP,
     ),
