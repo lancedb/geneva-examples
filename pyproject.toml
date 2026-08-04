@@ -6,15 +6,31 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "typer>=0.24.0",
     "pyyaml>=6.0",
-    # Pin the LanceDB stack to the versions the deployed cluster was built
-    # against (client/server must match or declare_table/backfill_column 500s).
+    # Pin the LanceDB stack to the exact versions the deployed driver runs.
+    # Two independent reasons these must match, not merely be compatible:
+    #   1. geneva's Ray manager prepends `geneva=={its own __version__}` to the
+    #      runtime_env pip list (geneva/runners/ray/_mgr.py). Our manifests add
+    #      `geneva=={client version}` from the installed env (core/package_specs.py),
+    #      so a mismatch puts two conflicting `geneva==` pins in one requirements
+    #      file and pip fails with ResolutionImpossible before Ray even starts.
+    #   2. lancedb/pylance skew between client and driver surfaces later, as
+    #      declare_table/backfill_column 500s.
+    # Read off driver release 2026-07-27 / 7b694cb418 (image
+    # sophon/geneva_driver:geneva_driver_release-2026-07-27.7b694cb418.x64) via:
+    #   kubectl -n lancedb exec <backfill-driver-pod> -c geneva-driver -- \
+    #     /geneva_driver/.venv/bin/python -c \
+    #     "import importlib.metadata as m; print(m.version('geneva'))"
+    # Re-check these whenever the data plane is upgraded.
     # pylance 9.x betas live on the lance-format index (see [tool.uv.sources]).
-    # pyarrow/numpy are left to geneva's own constraints.
-    #
-    "geneva==0.14.1b10",
-    "lancedb>=0.34.0b4",
-    "pylance>=9.0.0b21",
-    "pyarrow",
+    # numpy is left to geneva's own constraints.
+    "geneva==0.14.1b5",
+    "lancedb==0.35.0b2",
+    "pylance==9.1.0b2",
+    # Also the driver's version. The stack only floors this (geneva/lancedb
+    # pyarrow>=16, pylance >=14), so unpinned it drifts to the newest release
+    # and the client ends up on a different major than the workers, whose
+    # pyarrow comes from the manifests' PYARROW_PACKAGE_SPEC default.
+    "pyarrow==23.0.1",
     "numpy",
     "pillow>=10",
     "torch>=2.2",

@@ -623,7 +623,7 @@ wheels = [
 
 [[package]]
 name = "geneva"
-version = "0.14.1b10"
+version = "0.14.1b5"
 source = { registry = "https://pypi.fury.io/lancedb/" }
 dependencies = [
     { name = "aiohttp" },
@@ -658,9 +658,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://pypi.fury.io/lancedb/-/ver_11Bdej/geneva-0.14.1b10.tar.gz", hash = "sha256:fdeb69194003cac1e05b273ec0f327e5bb10645c9ea23e375730a80ee370e35a" }
+sdist = { url = "https://pypi.fury.io/lancedb/-/ver_1jeKnT/geneva-0.14.1b5.tar.gz", hash = "sha256:4cad90131441f9715d5a434a0a29d319a02b1ea544d931d8c9fe3080a45c9678" }
 wheels = [
-    { url = "https://pypi.fury.io/lancedb/-/ver_uaCAw/geneva-0.14.1b10-py3-none-any.whl", hash = "sha256:6a5d8922814b57620bc98632e84c3291dcd4e6c29c215528c7612cc5fd2cd467" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_JxCHI/geneva-0.14.1b5-py3-none-any.whl", hash = "sha256:239ba6609f31e4bf0dcf7434d75d7f60df3e839553f9ced9a7e6097042fc699b" },
 ]
 
 [[package]]
@@ -703,16 +703,16 @@ requires-dist = [
     { name = "av", specifier = ">=13" },
     { name = "controlnet-aux", specifier = ">=0.0.7" },
     { name = "datasets", specifier = ">=3.0.0" },
-    { name = "geneva", specifier = "==0.14.1b10", index = "https://pypi.fury.io/lancedb/" },
+    { name = "geneva", specifier = "==0.14.1b5", index = "https://pypi.fury.io/lancedb/" },
     { name = "gradio", specifier = ">=6" },
     { name = "huggingface-hub", specifier = ">=0.24" },
-    { name = "lancedb", specifier = ">=0.34.0b4", index = "https://pypi.fury.io/lancedb/" },
+    { name = "lancedb", specifier = "==0.35.0b2", index = "https://pypi.fury.io/lancedb/" },
     { name = "langchain-text-splitters", specifier = ">=0.3,<0.4" },
     { name = "numpy" },
     { name = "open-clip-torch", specifier = ">=2.24" },
     { name = "pillow", specifier = ">=10" },
-    { name = "pyarrow" },
-    { name = "pylance", specifier = ">=9.0.0b21", index = "https://pypi.fury.io/lance-format/" },
+    { name = "pyarrow", specifier = "==23.0.1" },
+    { name = "pylance", specifier = "==9.1.0b2", index = "https://pypi.fury.io/lance-format/" },
     { name = "pypdf", specifier = ">=5,<6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "textual", specifier = ">=1.0.0" },
@@ -1102,7 +1102,7 @@ wheels = [
 
 [[package]]
 name = "lancedb"
-version = "0.34.0b5"
+version = "0.35.0b2"
 source = { registry = "https://pypi.fury.io/lancedb/" }
 dependencies = [
     { name = "deprecation" },
@@ -1114,10 +1114,10 @@ dependencies = [
     { name = "tqdm" },
 ]
 wheels = [
-    { url = "https://pypi.fury.io/lancedb/-/ver_yLvTX/lancedb-0.34.0b5-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:6095cc77b2f0a4612299d24269a983d1e037c8e44babaedc22ee09f5a3002899" },
-    { url = "https://pypi.fury.io/lancedb/-/ver_16c6NC/lancedb-0.34.0b5-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:18ebc85e47e98497e6f0728007742ab708a4a63d6852fb91f5876d8553f6c318" },
-    { url = "https://pypi.fury.io/lancedb/-/ver_1GrjtR/lancedb-0.34.0b5-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:b9fb6b671c9d0b8e05df536a59dc2a77107b93df0852c951ca3d87e79e8c3641" },
-    { url = "https://pypi.fury.io/lancedb/-/ver_2dRU7w/lancedb-0.34.0b5-cp39-abi3-win_amd64.whl", hash = "sha256:119ede8ebf0d5136d5d1f9c365875006027a04f57fc72f38a2fa4e5870c45429" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_281KeU/lancedb-0.35.0b2-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:21d4b028548a9aa7281ebd9b941b52458fee2e3e112628b93ac034a91fbf43a9" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_kGVBR/lancedb-0.35.0b2-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:f5e885fc763570a75e3233c683eaf047e479501bd55eb71303a57cdbd5d99ace" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_Uo2dY/lancedb-0.35.0b2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:08bea42c88324e334ebfbf2a59e6b474d8ac97467607af16cc8acaac1b53fd60" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_Rv4G1/lancedb-0.35.0b2-cp39-abi3-win_amd64.whl", hash = "sha256:9be9a70fa99973f7fcf91883277d7d6286419c78063c7a381aad60341f52f3d5" },
 ]
 
 [[package]]
@@ -1907,17 +1907,17 @@ wheels = [
 
 [[package]]
 name = "pyarrow"
-version = "24.0.0"
+version = "23.0.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/91/13/13e1069b351bdc3881266e11147ffccf687505dbb0ea74036237f5d454a5/pyarrow-24.0.0.tar.gz", hash = "sha256:85fe721a14dd823aca09127acbb06c3ca723efbd436c004f16bca601b04dcc83", size = 1180261, upload-time = "2026-04-21T10:51:25.837Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/22/134986a4cc224d593c1afde5494d18ff629393d74cc2eddb176669f234a4/pyarrow-23.0.1.tar.gz", hash = "sha256:b8c5873e33440b2bc2f4a79d2b47017a89c5a24116c055625e6f2ee50523f019", size = 1167336, upload-time = "2026-02-16T10:14:12.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/a9/9686d9f07837f91f775e8932659192e02c74f9d8920524b480b85212cc68/pyarrow-24.0.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:6233c9ed9ab9d1db47de57d9753256d9dcffbf42db341576099f0fd9f6bf4810", size = 34981559, upload-time = "2026-04-21T10:47:22.17Z" },
-    { url = "https://files.pythonhosted.org/packages/80/b6/0ddf0e9b6ead3474ab087ae598c76b031fc45532bf6a63f3a553440fb258/pyarrow-24.0.0-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:f7616236ec1bc2b15bfdec22a71ab38851c86f8f05ff64f379e1278cf20c634a", size = 36663654, upload-time = "2026-04-21T10:47:28.315Z" },
-    { url = "https://files.pythonhosted.org/packages/7c/3b/926382efe8ce27ba729071d3566ade6dfb86bdf112f366000196b2f5780a/pyarrow-24.0.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:1617043b99bd33e5318ae18eb2919af09c71322ef1ca46566cdafc6e6712fb66", size = 45679394, upload-time = "2026-04-21T10:47:34.821Z" },
-    { url = "https://files.pythonhosted.org/packages/b3/7a/829f7d9dfd37c207206081d6dad474d81dde29952401f07f2ba507814818/pyarrow-24.0.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:6165461f55ef6314f026de6638d661188e3455d3ec49834556a0ebbdbace18bb", size = 48863122, upload-time = "2026-04-21T10:47:42.056Z" },
-    { url = "https://files.pythonhosted.org/packages/5f/e8/f88ce625fe8babaae64e8db2d417c7653adb3019b08aae85c5ed787dc816/pyarrow-24.0.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:3b13dedfe76a0ad2d1d859b0811b53827a4e9d93a0bcb05cf59333ab4980cc7e", size = 49376032, upload-time = "2026-04-21T10:47:48.967Z" },
-    { url = "https://files.pythonhosted.org/packages/36/7a/82c363caa145fff88fb475da50d3bf52bb024f61917be5424c3392eaf878/pyarrow-24.0.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:25ea65d868eb04015cd18e6df2fbe98f07e5bda2abefabcb88fce39a947716f6", size = 51929490, upload-time = "2026-04-21T10:47:55.981Z" },
-    { url = "https://files.pythonhosted.org/packages/66/1c/e3e72c8014ad2743ca64a701652c733cc5cbcee15c0463a32a8c55518d9e/pyarrow-24.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:295f0a7f2e242dabd513737cf076007dc5b2d59237e3eca37b05c0c6446f3826", size = 27355660, upload-time = "2026-04-21T10:48:01.718Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/4b/4166bb5abbfe6f750fc60ad337c43ecf61340fa52ab386da6e8dbf9e63c4/pyarrow-23.0.1-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:f4b0dbfa124c0bb161f8b5ebb40f1a680b70279aa0c9901d44a2b5a20806039f", size = 34214575, upload-time = "2026-02-16T10:09:56.225Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/da/3f941e3734ac8088ea588b53e860baeddac8323ea40ce22e3d0baa865cc9/pyarrow-23.0.1-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:7707d2b6673f7de054e2e83d59f9e805939038eebe1763fe811ee8fa5c0cd1a7", size = 35832540, upload-time = "2026-02-16T10:10:03.428Z" },
+    { url = "https://files.pythonhosted.org/packages/88/7c/3d841c366620e906d54430817531b877ba646310296df42ef697308c2705/pyarrow-23.0.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:86ff03fb9f1a320266e0de855dee4b17da6794c595d207f89bba40d16b5c78b9", size = 44470940, upload-time = "2026-02-16T10:10:10.704Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/a5/da83046273d990f256cb79796a190bbf7ec999269705ddc609403f8c6b06/pyarrow-23.0.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:813d99f31275919c383aab17f0f455a04f5a429c261cc411b1e9a8f5e4aaaa05", size = 47586063, upload-time = "2026-02-16T10:10:17.95Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/3c/b7d2ebcff47a514f47f9da1e74b7949138c58cfeb108cdd4ee62f43f0cf3/pyarrow-23.0.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:bf5842f960cddd2ef757d486041d57c96483efc295a8c4a0e20e704cbbf39c67", size = 48173045, upload-time = "2026-02-16T10:10:25.363Z" },
+    { url = "https://files.pythonhosted.org/packages/43/b2/b40961262213beaba6acfc88698eb773dfce32ecdf34d19291db94c2bd73/pyarrow-23.0.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:564baf97c858ecc03ec01a41062e8f4698abc3e6e2acd79c01c2e97880a19730", size = 50621741, upload-time = "2026-02-16T10:10:33.477Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/70/1fdda42d65b28b078e93d75d371b2185a61da89dda4def8ba6ba41ebdeb4/pyarrow-23.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:07deae7783782ac7250989a7b2ecde9b3c343a643f82e8a4df03d93b633006f0", size = 27620678, upload-time = "2026-02-16T10:10:39.31Z" },
 ]
 
 [[package]]
@@ -2015,7 +2015,7 @@ wheels = [
 
 [[package]]
 name = "pylance"
-version = "9.1.0b8"
+version = "9.1.0b2"
 source = { registry = "https://pypi.fury.io/lance-format/" }
 dependencies = [
     { name = "lance-namespace" },
@@ -2023,12 +2023,12 @@ dependencies = [
     { name = "pyarrow" },
 ]
 wheels = [
-    { url = "https://pypi.fury.io/lance-format/-/ver_AGX5P/pylance-9.1.0b8-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:d10be5ad0cabb0761978df9cf830362326595257ccfd41074ba0da513b02681c" },
-    { url = "https://pypi.fury.io/lance-format/-/ver_1KK5SU/pylance-9.1.0b8-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:642d4fbca85bf0630341af82884c62935ffec33de00990d3f0695797568b224e" },
-    { url = "https://pypi.fury.io/lance-format/-/ver_1xoB00/pylance-9.1.0b8-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fb3403281e794782423e32579c0b2992b1e050d29fc3d2218338c3d6554059a5" },
-    { url = "https://pypi.fury.io/lance-format/-/ver_2iJSLN/pylance-9.1.0b8-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:d0058676ddf22807a7eb47c270f08372def0159315d8457eb59ab020c0c98f05" },
-    { url = "https://pypi.fury.io/lance-format/-/ver_27GicD/pylance-9.1.0b8-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:cefc12581d9d030308ce5e7e8b5f20ab2784553aac72af6fac099b01f3823d52" },
-    { url = "https://pypi.fury.io/lance-format/-/ver_uPzKS/pylance-9.1.0b8-cp310-abi3-win_amd64.whl", hash = "sha256:7799f4717c1ccdb957b66d0875381aea3b1dd4f5aa0102aa513e6ee1ebe20409" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_dTIKO/pylance-9.1.0b2-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:158093530cda93b01268ee372ef79233ffa78933a2bcb6b0d58485e8d73725cf" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_Ntpjz/pylance-9.1.0b2-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:917ba4211fb208020f694f29af98b98db898dd2637987749c569da0eed075dae" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_21WnGO/pylance-9.1.0b2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:90cd9d0240a12c7940ada65a705d2a0e094a340e1639baf8945e23d3404fc9c9" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_1kTIUc/pylance-9.1.0b2-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:5dfe9564c87e08d97b77f4ecaf0ff597feda70b94c30a7a2f4af5988f833ce4d" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_1T9z54/pylance-9.1.0b2-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:2927b50f2d8d638ced972a9a29b89fa6c105f11759093749b5d6052c80951cbd" },
+    { url = "https://pypi.fury.io/lance-format/-/ver_1lJfuX/pylance-9.1.0b2-cp310-abi3-win_amd64.whl", hash = "sha256:3def5a811a8f759bff70371b27a939fafeeb9cb29903f63a44658a4e9be691f6" },
 ]
 
 [[package]]

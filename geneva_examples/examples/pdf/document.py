@@ -39,7 +39,7 @@ from geneva_examples.core.package_specs import package_spec
 GENEVA_PACKAGE_SPEC = package_spec("geneva")
 LANCEDB_PACKAGE_SPEC = package_spec("lancedb")
 PYLANCE_PACKAGE_SPEC = package_spec("pylance")
-PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.0")
+PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.1")
 PYPDF_PACKAGE_SPEC = os.environ.get("PYPDF_PACKAGE_SPEC", "pypdf>=5,<6")
 LANGCHAIN_TEXT_SPLITTERS_PACKAGE_SPEC = os.environ.get(
     "LANGCHAIN_TEXT_SPLITTERS_PACKAGE_SPEC", "langchain-text-splitters>=0.3,<0.4"

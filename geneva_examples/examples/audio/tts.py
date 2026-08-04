@@ -37,7 +37,7 @@ MMS_TTS_MODEL_ID = os.environ.get("MMS_TTS_MODEL_ID", "facebook/mms-tts-eng")
 GENEVA_PACKAGE_SPEC = package_spec("geneva")
 LANCEDB_PACKAGE_SPEC = package_spec("lancedb")
 PYLANCE_PACKAGE_SPEC = package_spec("pylance")
-PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.0")
+PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.1")
 NUMPY_PACKAGE_SPEC = os.environ.get("NUMPY_PACKAGE_SPEC", "numpy==2.4.6")
 TORCH_PACKAGE_SPEC = os.environ.get("TORCH_PACKAGE_SPEC", "torch==2.12.0")
 TRANSFORMERS_PACKAGE_SPEC = os.environ.get(

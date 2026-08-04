@@ -14,7 +14,7 @@ from geneva_examples.core.package_specs import package_spec
 GENEVA_PACKAGE_SPEC = package_spec("geneva")
 LANCEDB_PACKAGE_SPEC = package_spec("lancedb")
 PYLANCE_PACKAGE_SPEC = package_spec("pylance")
-PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.0")
+PYARROW_PACKAGE_SPEC = os.environ.get("PYARROW_PACKAGE_SPEC", "pyarrow==23.0.1")
 PILLOW_PACKAGE_SPEC = os.environ.get("PILLOW_PACKAGE_SPEC", "pillow==12.2.0")
 
 IMAGEINFO_RUNTIME_PIP = [
