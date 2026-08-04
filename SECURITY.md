@@ -18,9 +18,12 @@ This repository contains **example** Geneva UDFs and submission tooling. The mos
 relevant concerns are:
 
 - **Credentials.** All secrets live in `config.yaml`, which is gitignored; never
-  commit it. `config-example.yaml` is the only tracked template. A
-  `detect-private-key` pre-commit hook and a CI secret scan guard against
-  accidental leaks.
+  commit it. The tracked templates are `config-example-local.yaml` and
+  `config-example-enterprise.yaml`. A `detect-private-key` pre-commit hook and
+  a CI secret scan guard against accidental leaks.
+- **UDF Studio.** The Studio executes editor code in-process with no sandbox —
+  keep it on the loopback bind. See
+  [docs/workflows/udf-studio.md](docs/workflows/udf-studio.md#security-posture).
 - **Dependencies.** CI runs an advisory `pip-audit` scan and Dependabot proposes
   updates; the `geneva`/`lancedb`/`pylance` betas are pinned to match the deployed
   cluster.

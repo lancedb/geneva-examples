@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help install lock lint lint-fix format format-check typecheck \
-        test check audit precommit hooks udf-studio clean
+        test check audit precommit hooks udf-studio docs docs-check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -34,7 +34,13 @@ typecheck: ## Type-check the package with ty (preview; informational)
 test: ## Run the test suite with coverage (gate enforced via pyproject)
 	uv run pytest
 
-check: lint format-check test ## Run the full CI gate locally (lint + format + tests)
+docs: ## Regenerate generated docs (docs/reference/cli/, worker pins, llms.txt, llms-full.txt)
+	uv run python -m geneva_examples.docs_gen
+
+docs-check: ## Fail if generated docs are stale (run `make docs` to fix)
+	uv run python -m geneva_examples.docs_gen --check
+
+check: lint format-check docs-check test ## Run the full CI gate locally (lint + format + docs + tests)
 
 audit: ## Scan locked dependencies for known CVEs (mirrors the CI audit job)
 	uv export --frozen --no-emit-project --no-hashes \

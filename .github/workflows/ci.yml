@@ -40,6 +40,15 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check
 
+      # Generated reference docs (docs/reference/cli/, docs/reference/
+      # worker-runtime-pins.md, llms.txt, llms-full.txt) are committed for
+      # GitHub browsing and grep-ability. Re-render them in memory from the
+      # spec registry + docs tree and fail on any difference — a stale page
+      # means a spec, pin, or docs page changed without `make docs`. The fix
+      # is always: run `make docs`, commit the diff.
+      - name: Docs freshness (generated from the spec registry)
+        run: uv run python -m geneva_examples.docs_gen --check
+
       - name: Tests + coverage
         run: uv run pytest
 
