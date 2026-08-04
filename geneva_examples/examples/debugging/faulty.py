@@ -25,9 +25,11 @@ FAULTY_RUNTIME_PIP: list[str] = []
 def build_faulty_score_udf(*, input_column: str, fail_every: int, manifest: Any):
     """Build a scalar UDF that fails deterministically on some rows.
 
-    Scalar (per-row) on purpose: per-row execution is what makes geneva record
-    a ``row_address`` on each error record, which is the hook for the
-    retry-only-the-failed-rows workflow.
+    ``skip_on_error()`` selects geneva's SKIP_ROWS fault isolation, which
+    applies rows one at a time and stamps a ``row_address`` on each error
+    record — the hook for the retry-only-the-failed-rows workflow. Scalar and
+    array UDFs both get that isolation (RecordBatch UDFs are rejected); scalar
+    is used here for simplicity.
     """
     import geneva
     import pyarrow as pa

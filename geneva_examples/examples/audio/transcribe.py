@@ -72,9 +72,11 @@ def build_whisper_transcribe_udf(
     Reuses ``geneva.udfs.audio.WhisperChunkTranscriber`` (instantiated with
     ``model_id``) with this repo's manifest, a fresh ``version``, its input column
     rebound from the default ``samples`` to ``audio_column``, and the mode-resolved
-    Ray resources. Any ``transformers`` ASR checkpoint works (e.g.
-    ``openai/whisper-tiny`` … ``openai/whisper-large-v3-turbo``); it auto-downloads
-    on first run. Input: ``list<float32>`` @ 16 kHz; output: ``large_string``.
+    Ray resources. Any sequence-to-sequence (Whisper-family) checkpoint loaded via
+    ``AutoModelForSpeechSeq2Seq`` works (e.g. ``openai/whisper-tiny`` …
+    ``openai/whisper-large-v3-turbo``) and auto-downloads on first run; CTC
+    checkpoints (e.g. wav2vec2) do not. Input: ``list<float32>`` @ 16 kHz;
+    output: ``large_string``.
     """
     import attrs
     from geneva.udfs.audio import WhisperChunkTranscriber

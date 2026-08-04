@@ -224,6 +224,7 @@ SEED = Step(
         "way to load-test the frame stages without a full chunk run."
     ),
     run=seed.run,
+    requires="run ingest-videos-openvid first (or pass --seed-clip-table)",
     params=params_from_signature(
         seed.run,
         help=COMMON_HELP

@@ -1,5 +1,6 @@
 # --- Project-specific ---
-# secrets + connection; copy from config-example.yaml
+# secrets + connection; copy from config-example-local.yaml or
+# config-example-enterprise.yaml
 config.yaml
 # per-environment variants (config.staging.yaml, config.prod.yaml, ...) used via
 # `--config`. These hold API keys too, so ignore the whole family rather than
@@ -13,7 +14,8 @@ local_db/
 .geneva/
 # local MP4 download cache (ingest-videos)
 video_cache/
-# local PDF ingest directory (ingest-pdfs --pdf-dir default)
+# local PDF scratch directory (pass to ingest-pdfs --pdf-dir; the flag's
+# default is ./studio_data/pdfs, which is tracked but empty)
 pdf_data/
 
 # Stray local databases at the repo root. Any geneva connect whose uri is NOT

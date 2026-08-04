@@ -16,7 +16,8 @@ Geneva powers **both** modes:
 
 Table names are *not* config: each CLI declares its own ``--table-name`` default
 (``images`` for the image workflow, ``videos``/``video_clips`` for video,
-``pdfs`` for PDFs), so the target table is explicit per command.
+``pdfs`` for PDFs, ``audio`` for the audio round trip, ``debug_demo`` for the
+debugging demo), so the target table is explicit per command.
 """
 
 from __future__ import annotations

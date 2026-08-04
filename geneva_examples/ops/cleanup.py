@@ -1,9 +1,10 @@
-"""Cleanup CLI: drop the video + clips tables (and their MV siblings).
+"""Cleanup CLI: drop the video + clips tables.
 
-Drops ``videos`` and ``video_clips`` plus their transient ``<name>_mv``
-materialized views (and, with ``--pdfs-table``, the ``pdfs`` table), so you can
-start a fresh ingest/chunk run. Prompts for confirmation unless ``--yes`` is
-passed.
+Drops ``videos`` and ``video_clips`` (and, with ``--pdfs-table``, the ``pdfs``
+table), so you can start a fresh ingest/chunk run. The clips table *is* the
+materialized view — ``conn.create_udtf_view`` builds it under that name, so there
+is no separate sibling table to drop. Prompts for confirmation unless ``--yes``
+is passed.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def run(
         False, "--yes", "-y", help="Skip the confirmation prompt."
     ),
 ) -> None:
-    """Drop the video/clip tables (and their MV siblings)."""
+    """Drop the video/clip tables."""
     setup_logging(log_level)
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
@@ -47,12 +48,7 @@ def run(
     location = cfg.local_db_path if cfg.is_local else cfg.db_uri
 
     # Preserve order while de-duplicating (e.g. if videos_table == clips_table).
-    candidates = [
-        videos_table,
-        f"{videos_table}_mv",
-        clips_table,
-        f"{clips_table}_mv",
-    ]
+    candidates = [videos_table, clips_table]
     if pdfs_table:
         candidates.append(pdfs_table)
     targets: list[str] = []
