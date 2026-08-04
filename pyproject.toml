@@ -11,7 +11,7 @@ dependencies = [
     # pylance 9.x betas live on the lance-format index (see [tool.uv.sources]).
     # pyarrow/numpy are left to geneva's own constraints.
     #
-    "geneva==0.14.1b9",
+    "geneva==0.14.1b10",
     "lancedb>=0.34.0b4",
     "pylance>=9.0.0b21",
     "pyarrow",
@@ -84,9 +84,8 @@ prerelease = "allow"
 # Two Gemfury indexes, both `explicit` so only the packages pinned in
 # [tool.uv.sources] resolve from them; everything else stays on PyPI:
 #   - lancedb       → lancedb + geneva (betas). Public PyPI carries geneva's
-#                     *final* releases only (newest: 0.14.0), so any 0.14.1bN
-#                     pin MUST resolve from here or uv reports it as
-#                     unsatisfiable.
+#                     *final* releases only (newest: 0.14.0), so a 0.14.1bN pin
+#                     MUST resolve from here or uv calls it unsatisfiable.
 #   - lance-format  → pylance (7.x+ betas live here, not on the lancedb repo)
 [[tool.uv.index]]
 name = "lancedb"

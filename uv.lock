@@ -623,7 +623,7 @@ wheels = [
 
 [[package]]
 name = "geneva"
-version = "0.14.1b9"
+version = "0.14.1b10"
 source = { registry = "https://pypi.fury.io/lancedb/" }
 dependencies = [
     { name = "aiohttp" },
@@ -658,9 +658,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://pypi.fury.io/lancedb/-/ver_dJvho/geneva-0.14.1b9.tar.gz", hash = "sha256:b9b5098b585711b36c857b9701939ae0425d37339c77ee8b6e59c51888ce6001" }
+sdist = { url = "https://pypi.fury.io/lancedb/-/ver_11Bdej/geneva-0.14.1b10.tar.gz", hash = "sha256:fdeb69194003cac1e05b273ec0f327e5bb10645c9ea23e375730a80ee370e35a" }
 wheels = [
-    { url = "https://pypi.fury.io/lancedb/-/ver_21DOhN/geneva-0.14.1b9-py3-none-any.whl", hash = "sha256:ab69a58a86af0792e927145bc76bad22215274be4f03e37851b2ff648922fda7" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_uaCAw/geneva-0.14.1b10-py3-none-any.whl", hash = "sha256:6a5d8922814b57620bc98632e84c3291dcd4e6c29c215528c7612cc5fd2cd467" },
 ]
 
 [[package]]
@@ -703,7 +703,7 @@ requires-dist = [
     { name = "av", specifier = ">=13" },
     { name = "controlnet-aux", specifier = ">=0.0.7" },
     { name = "datasets", specifier = ">=3.0.0" },
-    { name = "geneva", specifier = "==0.14.1b9", index = "https://pypi.fury.io/lancedb/" },
+    { name = "geneva", specifier = "==0.14.1b10", index = "https://pypi.fury.io/lancedb/" },
     { name = "gradio", specifier = ">=6" },
     { name = "huggingface-hub", specifier = ">=0.24" },
     { name = "lancedb", specifier = ">=0.34.0b4", index = "https://pypi.fury.io/lancedb/" },
