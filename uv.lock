@@ -623,8 +623,8 @@ wheels = [
 
 [[package]]
 name = "geneva"
-version = "0.14.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.14.1b9"
+source = { registry = "https://pypi.fury.io/lancedb/" }
 dependencies = [
     { name = "aiohttp" },
     { name = "attrs" },
@@ -658,9 +658,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/c2/52221c8fe7955f96ef9f4957b3e7fb4531eafe31ff36e0656abb81a99367/geneva-0.14.0.tar.gz", hash = "sha256:5be2e64d5aa3bf214e6172e1d141c5363c46a2463e6024cc54245901214753e8", size = 4673990, upload-time = "2026-07-07T22:04:38.584Z" }
+sdist = { url = "https://pypi.fury.io/lancedb/-/ver_dJvho/geneva-0.14.1b9.tar.gz", hash = "sha256:b9b5098b585711b36c857b9701939ae0425d37339c77ee8b6e59c51888ce6001" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/0b/9c905f1d6da7282f72f86fdd7eec4da8b3682c654b43a78948b9ab3f8bba/geneva-0.14.0-py3-none-any.whl", hash = "sha256:d171e266f69d9bc063aa6440bfeef5da66359df1a1ebb48bbd8c378672de4fbc", size = 605705, upload-time = "2026-07-07T22:04:36.432Z" },
+    { url = "https://pypi.fury.io/lancedb/-/ver_21DOhN/geneva-0.14.1b9-py3-none-any.whl", hash = "sha256:ab69a58a86af0792e927145bc76bad22215274be4f03e37851b2ff648922fda7" },
 ]
 
 [[package]]
@@ -703,16 +703,16 @@ requires-dist = [
     { name = "av", specifier = ">=13" },
     { name = "controlnet-aux", specifier = ">=0.0.7" },
     { name = "datasets", specifier = ">=3.0.0" },
-    { name = "geneva", specifier = "==0.14.0" },
+    { name = "geneva", specifier = "==0.14.1b9", index = "https://pypi.fury.io/lancedb/" },
     { name = "gradio", specifier = ">=6" },
     { name = "huggingface-hub", specifier = ">=0.24" },
-    { name = "lancedb", specifier = "==0.34.0b5", index = "https://pypi.fury.io/lancedb/" },
+    { name = "lancedb", specifier = ">=0.34.0b4", index = "https://pypi.fury.io/lancedb/" },
     { name = "langchain-text-splitters", specifier = ">=0.3,<0.4" },
     { name = "numpy" },
     { name = "open-clip-torch", specifier = ">=2.24" },
     { name = "pillow", specifier = ">=10" },
     { name = "pyarrow" },
-    { name = "pylance", specifier = ">=9.0.0b15", index = "https://pypi.fury.io/lance-format/" },
+    { name = "pylance", specifier = ">=9.0.0b21", index = "https://pypi.fury.io/lance-format/" },
     { name = "pypdf", specifier = ">=5,<6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "textual", specifier = ">=1.0.0" },
