@@ -266,7 +266,7 @@ def test_connect_enterprise_passes_cloud_credentials(monkeypatch):
     assert captured["region"] == "us-east-1"
 
 
-def test_build_manifest_builds_a_pinned_manifest_in_enterprise(monkeypatch):
+def test_build_manifest_builds_a_pinned_conda_manifest_in_enterprise(monkeypatch):
     import sys
     import types as _types
 
@@ -274,12 +274,12 @@ def test_build_manifest_builds_a_pinned_manifest_in_enterprise(monkeypatch):
 
     class _Manifest:
         @classmethod
-        def create_pip(cls, name):
+        def create_conda(cls, name):
             built["name"] = name
             return cls()
 
-        def pip(self, specs):
-            built["pip"] = specs
+        def conda(self, env):
+            built["conda"] = env
             return self
 
         def build(self):
@@ -293,8 +293,20 @@ def test_build_manifest_builds_a_pinned_manifest_in_enterprise(monkeypatch):
     out = common.build_manifest(Config(mode="enterprise"), "vid", ["pkg==1"])
 
     assert out == "manifest"
-    assert built["pip"] == ["pkg==1"]
     assert built["built"] is True
+    # the caller's pip list is nested inside conda's dependencies, not a
+    # separate top-level pip -- Ray's runtime_env doesn't allow both.
+    deps = built["conda"]["dependencies"]
+    nested_pip = next(d["pip"] for d in deps if isinstance(d, dict) and "pip" in d)
+    # the Gemfury extra-index directives must precede the caller's packages --
+    # conda's internal pip subprocess doesn't see PIP_EXTRA_INDEX_URL, so
+    # without these, "pkg==1" would only ever resolve against public PyPI.
+    assert nested_pip == [
+        "--extra-index-url=https://pypi.fury.io/lancedb/",
+        "--extra-index-url=https://pypi.fury.io/lance-format/",
+        "pkg==1",
+    ]
+    assert any(dep.startswith("ffmpeg") for dep in deps if isinstance(dep, str))
     # the prefix gets a random suffix so repeat runs don't collide
     assert built["name"].startswith("vid-") and len(built["name"]) > len("vid-")
 

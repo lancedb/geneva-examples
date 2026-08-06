@@ -10,7 +10,31 @@ material to analyze in the TUI table viewer (``uv run tui`` -> Tables ->
 from __future__ import annotations
 
 from geneva_examples.core.spec import Example, Param, Step
-from geneva_examples.examples.debugging import seed_errors
+from geneva_examples.examples.debugging import seed_errors, seed_ffmpeg
+
+DEMO_FFMPEG = Step(
+    key="demo-ffmpeg",
+    title="Probe ffmpeg availability",
+    description=(
+        "Seed a tiny `(id,)` table, then backfill an `ffmpeg_version` column "
+        "with a UDF that shells out to `ffmpeg -version`. Use `--mode "
+        "enterprise` -- that's what actually exercises build_manifest()'s "
+        "conda-based COMMON_CONDA_DEPENDENCIES on the remote cluster; "
+        "`--mode local` only checks your own laptop's PATH."
+    ),
+    run=seed_ffmpeg.run,
+    params=(
+        Param("table_name", str, "ffmpeg_probe_demo", "Demo table to (over)write."),
+        Param("rows", int, 4, "Rows to seed.", min=1),
+        Param("concurrency", int, 2, "Backfill concurrency.", min=1),
+        Param("task_size", int, 4, "Rows per read task.", min=1),
+        Param("checkpoint_size", int, 4, "Rows per UDF checkpoint.", min=1),
+        Param("backfill_timeout_min", int, 15, "Backfill timeout (min).", min=1),
+        Param("flush_interval_s", float, 5.0, "Checkpoint flush interval (s).", min=0),
+        Param("schema_wait_attempts", int, 30, "Schema-visibility attempts.", min=1),
+        Param("schema_wait_sleep_s", int, 2, "Seconds between checks.", min=0),
+    ),
+)
 
 DEMO_ERRORS = Step(
     key="demo-errors",
@@ -49,5 +73,5 @@ EXAMPLE = Example(
     title="Debugging demo",
     description=__doc__ or "",
     modality="demo",
-    steps=(DEMO_ERRORS,),
+    steps=(DEMO_ERRORS, DEMO_FFMPEG),
 )

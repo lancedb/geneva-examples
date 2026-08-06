@@ -233,18 +233,58 @@ def runtime_session(conn: object, config: Config) -> AbstractContextManager:
         return conn.local_ray_context()  # type: ignore[attr-defined]
 
 
+# conda-forge packages every remote worker environment gets, regardless of
+# which UDF's pip deps ride alongside them via build_manifest(). Ray's
+# runtime_env accepts pip XOR conda, never both, so build_manifest folds the
+# caller's pip list into conda's nested ``pip:`` key instead of setting a
+# separate top-level ``pip:`` -- see the ffmpeg CLI example in
+# geneva_examples/examples/debugging/ffmpeg_probe.py.
+COMMON_CONDA_DEPENDENCIES = [
+    "python=3.12",
+    os.environ.get("FFMPEG_PACKAGE_SPEC", "ffmpeg=8.1.2"),
+]
+
+# Geneva/lancedb/pylance betas live on Gemfury, not public PyPI (see the
+# [tool.uv.index] comment in pyproject.toml). Ray's pip runtime_env picks this
+# up via a PIP_EXTRA_INDEX_URL env var (geneva._mgr._EXTRA_PIP_INDEX_URLS), but
+# conda's own internal `pip install -r requirements.txt` subprocess doesn't see
+# that env var -- it must be a literal requirements-file directive, which is
+# why this has to be a plain list entry rather than an env var here too.
+_CONDA_PIP_EXTRA_INDEX_URLS = [
+    "--extra-index-url=https://pypi.fury.io/lancedb/",
+    "--extra-index-url=https://pypi.fury.io/lance-format/",
+]
+
+
 def build_manifest(config: Config, prefix: str, pip: list[str]) -> object | None:
-    """Build a pinned pip manifest for remote workers, or ``None`` locally.
+    """Build a pinned conda manifest for remote workers, or ``None`` locally.
 
     Local Ray workers share the driver's environment, so no manifest/packaging is
     needed and ``@geneva.udf`` accepts ``manifest=None``.
+
+    Goes through conda (not a plain pip manifest) so every caller's workers also
+    get ``COMMON_CONDA_DEPENDENCIES`` (e.g. the ``ffmpeg`` CLI) without each UDF
+    module having to ask for it individually. ``pip`` is nested inside conda's
+    dependency list -- nothing is auto-injected the way it is for a pip-only
+    manifest, so this list must carry everything the worker needs, including
+    ``geneva`` itself.
     """
     if config.is_local:
         return None
     from geneva.manifest import GenevaManifest
 
+    conda_env = {
+        "channels": ["conda-forge"],
+        "dependencies": [
+            *COMMON_CONDA_DEPENDENCIES,
+            "pip",
+            {"pip": [*_CONDA_PIP_EXTRA_INDEX_URLS, *pip]},
+        ],
+    }
     return (
-        GenevaManifest.create_pip(f"{prefix}-{uuid.uuid4().hex[:6]}").pip(pip).build()
+        GenevaManifest.create_conda(f"{prefix}-{uuid.uuid4().hex[:6]}")
+        .conda(conda_env)
+        .build()
     )
 
 
