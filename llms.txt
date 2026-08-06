@@ -1,0 +1,43 @@
+# geneva-examples
+
+> Runnable example Geneva UDF pipelines for LanceDB: five examples (images,
+> video, pdf, audio, debugging) that ingest media into LanceDB tables and
+> backfill feature columns or build chunker materialized views. One
+> declarative spec per step generates both the CLI commands
+> (`uv run <command>`) and the interactive TUI. Runs in local mode (on-disk
+> Lance database, zero config) or enterprise mode (LanceDB Enterprise + a
+> remote Geneva runtime).
+
+Paths are repo-relative; remote readers resolve them against the repository's
+raw URL root. The registry of examples is
+`geneva_examples/examples/__init__.py`, and the CLI reference below is
+generated from it. Setup is `make install`; the CI gate is `make check`.
+The complete docs corpus concatenated into one file is `llms-full.txt`.
+
+
+## Docs
+
+- [Documentation index](docs/README.md): every page with one-line descriptions, term conventions, and grep hints
+- [Configuration and modes](docs/getting-started/configuration.md): all config.yaml keys, mode precedence, credential sets, R2 region rule
+- [Local-mode behavior](docs/reference/local-mode.md): exactly how every resource knob is clamped on a laptop
+- [Backfills: reset vs incremental](docs/concepts/backfills.md): the destructive-default contract and the overlap invariant
+- [Materialized views and stable row IDs](docs/concepts/materialized-views.md): the unrecoverable-view invariant every table creation guards against
+- [Spec and CLI generation](docs/concepts/spec-and-cli-generation.md): how Example → Step → Param becomes commands and TUI forms
+- [Environment variables](docs/reference/environment-variables.md): *_PACKAGE_SPEC overrides, the ASSETS_S3_* worker contract, and the variables the code sets itself
+- [Tables and schemas](docs/reference/tables-and-schemas.md): every column each pipeline produces, plus geneva_jobs/geneva_errors
+- [Adding a step](docs/authoring/adding-a-step.md): the single checklist for adding steps and whole examples
+- [Writing UDFs](docs/authoring/writing-udfs.md): closure rules, manifests, worker credentials
+- [Testing guide](docs/authoring/testing.md): the two-tier geneva mock, the smoke-test recipe, coverage-gate mechanics
+- [Glossary](docs/reference/glossary.md): one definition per term, each anchored to a code path
+
+## Reference
+
+- [Command index](docs/reference/cli/index.md): every console script, generated from the spec registry
+- [CLI reference: video](docs/reference/cli/video.md): generated flag tables for the 10 video steps
+- [CLI reference: images](docs/reference/cli/images.md): generated flag tables for the 4 image steps
+- [Worker runtime pins](docs/reference/worker-runtime-pins.md): per-manifest pip specs and *_PACKAGE_SPEC env overrides
+
+## Optional
+
+- [Troubleshooting](docs/operations/troubleshooting.md): symptom → cause → fix, including client/driver pin skew
+- [Version pins and cluster upgrades](docs/operations/version-pins.md): the two pin tiers and the upgrade runbook

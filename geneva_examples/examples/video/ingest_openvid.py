@@ -69,6 +69,18 @@ def run(
 
     conn = connect(cfg)
 
+    # Fail fast on the default re-run. `--overwrite` is off by default here
+    # (unlike every other ingest) so an existing pointer table is never dropped
+    # by accident -- but the only write path below is `create_table`, which the
+    # existing table makes impossible. Without this check that error surfaces
+    # only after retry_io burns every --table-write-retries attempt on a failure
+    # that can never succeed.
+    if not overwrite and table_name in conn.table_names():
+        raise RuntimeError(
+            f"table {table_name!r} already exists — pass --overwrite to drop and "
+            "re-ingest (the default is off to protect an existing pointer table)"
+        )
+
     src = lance.dataset(dataset_uri)
     reader = src.scanner(
         columns=OPENVID_SOURCE_COLUMNS,

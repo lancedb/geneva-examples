@@ -1,7 +1,7 @@
 [project]
 name = "geneva-examples"
 version = "0.1.0"
-description = "Example Geneva UDFs and submission tooling: load images/videos into LanceDB Enterprise, then backfill lightweight features, OpenCLIP embeddings, BLIP captions, and OpenPose skeletons via remote Geneva UDFs."
+description = "Example Geneva UDF pipelines and tooling: ingest images, videos, PDFs, and audio into LanceDB, then backfill features (OpenCLIP embeddings, BLIP captions, OpenPose skeletons, PDF chunks, MMS-TTS speech, Whisper transcripts) via Geneva UDFs — on local Ray or LanceDB Enterprise."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "typer>=0.24.0",

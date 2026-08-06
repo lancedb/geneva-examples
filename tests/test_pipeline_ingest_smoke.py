@@ -94,7 +94,9 @@ def test_ingest_pdfs_creates_and_adds(monkeypatch: pytest.MonkeyPatch) -> None:
     assert conn.create_kwargs["pdfs"]["storage_options"] == _STABLE_ROW_ID_OPTIONS
 
 
-def test_cleanup_drops_tables_and_mv_siblings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cleanup_drops_exactly_the_named_tables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from geneva_examples.ops import cleanup
 
     conn = FakeConn()
@@ -105,13 +107,103 @@ def test_cleanup_drops_tables_and_mv_siblings(monkeypatch: pytest.MonkeyPatch) -
     )
 
     assert result.exit_code == 0, result.output
-    assert conn.dropped == [
-        "videos",
-        "videos_mv",
-        "video_clips",
-        "video_clips_mv",
-        "pdfs",
-    ]
+    assert conn.dropped == ["videos", "video_clips", "pdfs"]
+
+
+# --- ingest-videos-openvid ----------------------------------------------------
+
+
+class _FakeOpenVidScanner:
+    def __init__(self, batches):
+        self._batches = batches
+
+    def to_batches(self):
+        return iter(self._batches)
+
+
+class _FakeOpenVidDataset:
+    """``lance.dataset(...)`` stand-in handing back fixed source batches."""
+
+    def __init__(self, batches):
+        self._batches = batches
+        self.scans: list[dict] = []
+
+    def scanner(self, **kwargs):
+        self.scans.append(kwargs)
+        return _FakeOpenVidScanner(self._batches)
+
+
+def _invoke_ingest_openvid(monkeypatch, conn, args, *, batches=("b1",)):
+    """Drive ingest-videos-openvid with the OpenVid dataset read mocked out.
+
+    Returns the CliRunner result plus the URIs ``lance.dataset`` was asked for —
+    empty means the command bailed before touching the source dataset.
+    """
+    from geneva_examples.examples.video import ingest_openvid as mod
+
+    monkeypatch.setattr(mod, "connect", lambda _cfg: conn)
+    dataset = _FakeOpenVidDataset(list(batches))
+    opened: list[str] = []
+
+    def _dataset(uri, *_a, **_k):
+        opened.append(uri)
+        return dataset
+
+    monkeypatch.setattr("lance.dataset", _dataset)
+    monkeypatch.setattr(
+        "geneva_examples.core.utils.videos.normalize_openvid_reference_batch",
+        lambda raw, **_kw: types.SimpleNamespace(num_rows=2, raw=raw),
+    )
+    result = CliRunner().invoke(cli.ingest_videos_openvid, ["--mode", "local", *args])
+    return result, opened
+
+
+def test_ingest_videos_openvid_creates_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    conn = FakeConn(table=FakeTable(names=["video_id", "openvid_rowid"]))
+
+    result, opened = _invoke_ingest_openvid(monkeypatch, conn, [], batches=("b1", "b2"))
+
+    assert result.exit_code == 0, result.output
+    assert opened == ["hf://datasets/lance-format/openvid-lance/data/train.lance"]
+    assert conn.dropped == []  # overwrite defaults off: nothing dropped
+    assert "videos" in conn.created
+    assert len(conn.created["videos"].adds) == 1  # first batch created, rest appended
+    assert conn.create_kwargs["videos"]["storage_options"] == _STABLE_ROW_ID_OPTIONS
+
+
+def test_ingest_videos_openvid_fails_fast_when_table_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The only write path is create_table, so a default re-run can never append.
+
+    Say so at once instead of letting create_table burn every
+    --table-write-retries attempt on a failure that cannot succeed.
+    """
+    existing = FakeTable(names=["video_id", "openvid_rowid"])
+    conn = FakeConn(table=existing, tables={"videos": existing})
+
+    result, opened = _invoke_ingest_openvid(monkeypatch, conn, [])
+
+    assert result.exit_code != 0
+    message = str(result.exception)
+    assert "table 'videos' already exists" in message
+    assert "--overwrite" in message
+    assert opened == []  # bailed before reading a single OpenVid row
+    assert conn.dropped == []  # and left the existing pointer table alone
+
+
+def test_ingest_videos_openvid_overwrite_recreates_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = FakeTable(names=["video_id", "openvid_rowid"])
+    conn = FakeConn(table=existing, tables={"videos": existing})
+
+    result, opened = _invoke_ingest_openvid(monkeypatch, conn, ["--overwrite"])
+
+    assert result.exit_code == 0, result.output
+    assert conn.dropped == ["videos"]  # dropped, then recreated
+    assert "videos" in conn.created
+    assert opened == ["hf://datasets/lance-format/openvid-lance/data/train.lance"]
 
 
 # --- ingest-videos-external ---------------------------------------------------

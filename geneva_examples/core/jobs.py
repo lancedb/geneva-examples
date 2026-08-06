@@ -190,9 +190,10 @@ def format_detail(jr: object, events_limit: int | None = 10) -> str:
 def list_jobs(conn: Any, table: str | None, statuses: list[str]) -> list:
     """Union jobs across statuses.
 
-    geneva's ``list_jobs`` builds an empty ``WHERE`` clause (invalid SQL) when no
-    filter is passed, so we always query per-status and merge by job_id. A status
-    that errors is logged and skipped rather than sinking the whole listing.
+    Query per-status and merge by job_id so a status that errors is logged and
+    skipped rather than sinking the whole listing. (In geneva 0.14.1b5
+    ``JobStateManager.list_jobs`` guards its ``WHERE`` with ``if wheres:``, so a
+    no-filter call is valid — the per-status loop is defensive, not required.)
     """
     merged: dict = {}
     for s in statuses:

@@ -36,6 +36,17 @@ repos:
         types_or: [python, pyi]
         require_serial: true
 
+      # Generated docs (docs/reference/cli/, worker-runtime-pins.md, llms.txt,
+      # llms-full.txt) must match the spec registry and the docs tree
+      # (llms-full.txt concatenates every docs page, so any docs edit needs a
+      # regeneration). Scoped by `files` accordingly. Fix: `make docs`.
+      - id: docs-check
+        name: generated docs up to date
+        entry: uv run python -m geneva_examples.docs_gen --check
+        language: system
+        pass_filenames: false
+        files: ^(geneva_examples/(examples/|core/spec\.py|core/package_specs\.py|docs_gen/)|docs/|llms\.txt|llms-full\.txt|pyproject\.toml)
+
       # ty is in preview (0.0.x) and still reports many false positives on
       # untyped ML deps, so it does NOT gate commits. It stays one command away.
       - id: ty

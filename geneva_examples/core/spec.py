@@ -145,7 +145,7 @@ class Example:
     name: str
     title: str
     description: str
-    modality: str  # image | video | pdf
+    modality: str  # free-form UI hint (live values: image, video, pdf, audio, demo)
     steps: tuple[Step, ...] = field(default_factory=tuple)
 
     def step(self, key: str) -> Step:
@@ -156,8 +156,6 @@ class Example:
 
 
 # --- shared parameter resolution --------------------------------------------
-
-_COMMON = ("config", "mode", "db_uri", "log_level")
 
 
 def resolve_config(

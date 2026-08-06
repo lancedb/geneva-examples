@@ -1,7 +1,7 @@
 """UDF Studio: a Gradio sandbox for prototyping Geneva UDFs / chunkers.
 
 Pick a starting template, point it at sample data on disk (images / videos /
-audio / text — see ``studio_data/README.md``), and run your ``transform`` /
+audio / text / pdfs — see ``studio_data/README.md``), and run your ``transform`` /
 ``chunk`` function **locally on the driver** to see its output before wiring it
 into a stage. Work in progress can be saved to a local LanceDB library.
 

@@ -10,7 +10,7 @@ tokenizer needs no ``uroman`` preprocessing.
 
 Output is a variable-length ``list<float32>`` waveform at **16 kHz** — recorded in
 the column's ``field_metadata`` as ``sample_rate_hz`` — which is exactly what the
-downstream ``whisper-tiny`` transcription stage expects, so the two chain with no
+downstream Whisper transcription stage expects, so the two chain with no
 resampling. Mirrors the factory + decorated-class shape of
 :mod:`geneva_examples.examples._shared.clip`.
 """

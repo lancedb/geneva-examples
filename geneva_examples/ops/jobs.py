@@ -167,7 +167,7 @@ def kill(
     """Cancel a job by id, transitioning it to the CANCELLED terminal state.
 
     Geneva exposes no API to forcibly terminate already-running compute, so this
-    flips the job record's status to CANCELLED in the ``_geneva_jobs`` system
+    flips the job record's status to CANCELLED in the ``geneva_jobs`` system
     table. A PENDING job is stopped before it is dispatched; a RUNNING backfill's
     in-flight Ray tasks may keep going until they finish or time out, but the job
     will read as CANCELLED.
