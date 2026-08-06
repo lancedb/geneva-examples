@@ -18,8 +18,14 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-# The UDF body uses builtins only — no extra worker packages.
-FAULTY_RUNTIME_PIP: list[str] = []
+from geneva_examples.core.package_specs import package_spec
+
+# The UDF body uses builtins only, but the worker process still needs geneva
+# itself importable. A pip-only manifest gets this for free (init_ray()
+# auto-injects the geneva pin whenever no conda is involved); build_manifest()
+# now always goes through conda, which skips that auto-injection entirely, so
+# it must be listed explicitly like every other *_RUNTIME_PIP in this repo.
+FAULTY_RUNTIME_PIP: list[str] = [package_spec("geneva")]
 
 
 def build_faulty_score_udf(*, input_column: str, fail_every: int, manifest: Any):

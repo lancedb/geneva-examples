@@ -41,3 +41,4 @@ export_audio = build_command(audio.EXAMPLE, audio.EXPORT)
 
 # --- debugging demo ---------------------------------------------------------
 demo_errors = build_command(debugging.EXAMPLE, debugging.DEMO_ERRORS)
+demo_ffmpeg = build_command(debugging.EXAMPLE, debugging.DEMO_FFMPEG)

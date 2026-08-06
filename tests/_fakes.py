@@ -169,13 +169,22 @@ class FakeConn:
 
 
 class FakeManifest:
-    """GenevaManifest stand-in: create_pip(...).pip(...).build()."""
+    """GenevaManifest stand-in: create_pip(...).pip(...).build(), or the conda
+    equivalent create_conda(...).conda(...).build() used by build_manifest()
+    (see geneva_examples/core/common.py)."""
 
     @classmethod
     def create_pip(cls, _name: str) -> FakeManifest:
         return cls()
 
     def pip(self, _specs: list[str]) -> FakeManifest:
+        return self
+
+    @classmethod
+    def create_conda(cls, _name: str) -> FakeManifest:
+        return cls()
+
+    def conda(self, _env: dict) -> FakeManifest:
         return self
 
     def build(self) -> FakeManifest:
