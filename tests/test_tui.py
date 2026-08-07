@@ -520,6 +520,94 @@ def test_tui_recreated_table_read_explains_itself():
     assert _read_error("images", elsewhere).startswith("RuntimeError:")
 
 
+def _poisoned(monkeypatch, tmp_path, rows: int, *, mode: str = "local"):
+    """A geneva connection that fails the way a recreated table's read fails.
+
+    Backed by a real on-disk Lance dataset, so the fallback has something
+    truthful to find — the whole point is that the rows *are* there.
+    """
+    import lance
+    import pyarrow as pa
+
+    from geneva_examples.tui import app as tui_app
+
+    lance.write_dataset(
+        pa.table({"id": pa.array(range(rows)), "tag": pa.array(["x"] * rows)}),
+        tmp_path / "images.lance",
+        mode="overwrite",  # the enterprise case re-seeds the same tmp_path
+    )
+
+    class Poisoned:
+        def open_table(self, name, **_kw):
+            raise RuntimeError(
+                "External error: Not found: "
+                f"{tmp_path}/{name}.lance/data/0111d7a7af45.lance"
+            )
+
+    monkeypatch.setattr(tui_app, "connect", lambda _cfg: Poisoned())
+    monkeypatch.setattr(
+        tui_app,
+        "load_config",
+        lambda p=None, **kw: Config(mode=mode, local_db_path=str(tmp_path)),
+    )
+    _quiet_tables(monkeypatch)
+
+
+async def _read_table(app, pilot, name: str, system: bool = False) -> str:
+    app._open_table(name, system, "loading")
+    for _ in range(50):
+        await pilot.pause(0.1)
+        info = str(app.query_one("#table-info", Static)._content)
+        if "loading" not in info:
+            return info
+    return info
+
+
+def test_tui_recreated_local_table_is_read_through_lance(monkeypatch, tmp_path):
+    """geneva can't read it for the life of the process; show the rows anyway.
+
+    The fallback is a rescue, not the normal route — so it announces itself in
+    the info line rather than quietly papering over a stale connection.
+    """
+    _poisoned(monkeypatch, tmp_path, rows=7)
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            info = await _read_table(app, pilot, "images")
+
+            assert "7 rows × 2 cols" in info
+            assert "read via lance" in info
+            assert len(app.query_one("#table-view", DataTable).rows) == 7
+
+    asyncio.run(scenario())
+
+
+def test_tui_recreated_table_keeps_the_message_where_lance_cannot_help(
+    monkeypatch, tmp_path
+):
+    """System tables and enterprise reads have no local path to fall back to."""
+
+    async def scenario(name: str, system: bool) -> str:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            return await _read_table(app, pilot, name, system)
+
+    # a system table lives in a namespace, not <local_db>/<name>.lance
+    _poisoned(monkeypatch, tmp_path, rows=7)
+    info = asyncio.run(scenario("geneva_errors", True))
+    assert "recreated after this app connected" in info
+    assert "read via lance" not in info
+
+    # and enterprise tables are not on this disk at all
+    _poisoned(monkeypatch, tmp_path, rows=7, mode="enterprise")
+    info = asyncio.run(scenario("images", False))
+    assert "recreated after this app connected" in info
+    assert "read via lance" not in info
+
+
 def _delete_tool(monkeypatch, tables: list[str]):
     """A fake backend for the Tools → Delete Table app; returns the connection."""
     from _fakes import FakeConn, FakeTable

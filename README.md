@@ -275,6 +275,16 @@ remembering command names. The left nav has four sections — **Tables**,
   accepted if you type one, and the listing is dropped whenever you switch
   backends.
 
+Deleting a table and recreating it at the same name — the `delete-table` then
+`ingest-*` loop — leaves the *running* app resolving the old table's files, so
+a row scan asks for fragments that no longer exist. `table_names()` and
+`drop_table()` stay correct, so the listing and the delete tool keep working;
+only the scan breaks, and it stays broken for the life of the process. In local
+mode the viewer falls back to reading the table through Lance and says so in the
+info line (`read via lance`). Enterprise reads and the system tables have no
+local path to fall back to, so there the pane explains the cause and asks you to
+restart `uv run tui`.
+
 Every step is *also* a plain command (below), generated from the same spec — so
 `uv run <name>` and the TUI always agree on parameters and descriptions. The
 Jobs view reads the same records as `uv run jobs` and renders them identically

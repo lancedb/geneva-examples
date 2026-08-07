@@ -135,24 +135,29 @@ _STATUS_STYLES = {
 }
 
 
-def _read_error(name: str, exc: Exception) -> str:
-    """The message for a failed table read, naming the cause we can recognize.
+def _is_recreated_error(name: str, exc: Exception) -> bool:
+    """Is this the read that is resolving a recreated table's deleted files?
 
     Dropping a table and recreating it at the same path leaves this process
-    resolving the *previous* manifest: the scan then asks for fragment files
-    that were deleted with the old table, and reports a path the reader can do
-    nothing with. It is not transient and it is not repairable from here —
-    ``checkout_latest()``, a fresh ``lancedb.Session``, ``index_cache_size``
-    and ``read_consistency_interval=0`` were all tried, and only a new process
-    reads the table again (plain ``lance.dataset()`` is unaffected, so the
-    stale state is above Lance, in the geneva/lancedb connection layer).
+    resolving the *previous* manifest, so the scan asks for fragment files
+    that went with the old table. It is not transient and not repairable in
+    place: ``checkout_latest()``, a fresh ``lancedb.Session``,
+    ``index_cache_size`` and ``read_consistency_interval=0`` were all tried,
+    and the delete mechanism makes no difference either (a plain ``rmtree``
+    poisons it identically) — the trigger is having *read* the path before.
 
     ``table_names()`` and ``drop_table()`` stay correct throughout, so the
-    Tables *listing* and the Delete Table tool keep working — it is only the
-    row scan that breaks. Say so, rather than printing the missing fragment.
+    listing and the Delete Table tool are unaffected; only the scan breaks.
+    Recognized by shape: a missing data fragment under this table's own
+    directory.
     """
     text = str(exc)
-    if "Not found:" in text and f"{name}.lance/data/" in text:
+    return "Not found:" in text and f"{name}.lance/data/" in text
+
+
+def _read_error(name: str, exc: Exception) -> str:
+    """The message for a failed table read, naming the cause we can recognize."""
+    if _is_recreated_error(name, exc):
         return (
             f"{name} was recreated after this app connected, so the read is "
             "still resolving the old table's files. Restart `uv run tui` to see "
@@ -160,6 +165,27 @@ def _read_error(name: str, exc: Exception) -> str:
             "are unaffected.)"
         )
     return f"{type(exc).__name__}: {exc}"
+
+
+def _lance_read(cfg, name: str, where: str | None, limit: int):
+    """Read a local table straight from Lance, around the stale connection.
+
+    Only reached from the recreated-table failure above, and only in local
+    mode — where a table is a directory we can name, ``<local_db>/<name>.lance``.
+    Lance's own reader resolves that path correctly no matter how many times
+    the table has been recreated, so this recovers the one failure the geneva
+    read path cannot: it is a rescue, not the normal route. Everything else,
+    including every enterprise read, still goes through geneva.
+    """
+    from pathlib import Path
+
+    import lance
+
+    dataset = lance.dataset(str(Path(cfg.local_db_path).expanduser() / f"{name}.lance"))
+    cols = [field.name for field in dataset.schema]
+    total = dataset.count_rows(filter=where) if where else dataset.count_rows()
+    rows = dataset.to_table(columns=cols, filter=where, limit=limit).to_pylist()
+    return cols, rows, total
 
 
 def _deletable(names: list[str]) -> list[str]:
@@ -777,12 +803,32 @@ class GenevaTUI(App):
                 if where:
                     query = query.where(where)
                 rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
-            err = None
+            err, rescued = None, False
         except Exception as exc:  # noqa: BLE001 - surface to the info line
             cols, rows, total, err = [], [], 0, _read_error(name, exc)
-            ts_col = None
+            ts_col, rescued = None, False
+            # A recreated local table is unreadable through geneva for the life
+            # of this process, so fall back to Lance rather than show the user
+            # an error about a table that is sitting right there. System tables
+            # live in a namespace, not a path we can name, so they keep the
+            # message. If the rescue fails too, the explanation stands.
+            if not system and cfg.is_local and _is_recreated_error(name, exc):
+                try:
+                    cols, rows, total = _lance_read(cfg, name, where, _TABLE_ROW_LIMIT)
+                    err, rescued = None, True
+                except Exception:  # noqa: BLE001 - keep the original explanation
+                    pass
         self._post(
-            epoch, self._show_table, name, cols, rows, total, err, where, bool(ts_col)
+            epoch,
+            self._show_table,
+            name,
+            cols,
+            rows,
+            total,
+            err,
+            where,
+            bool(ts_col),
+            rescued,
         )
 
     def _show_table(
@@ -794,6 +840,7 @@ class GenevaTUI(App):
         err: str | None,
         where: str | None = None,
         newest_first: bool = False,
+        rescued: bool = False,
     ) -> None:
         info = self.query_one("#table-info", Static)
         grid = self.query_one("#table-view", DataTable)
@@ -805,9 +852,16 @@ class GenevaTUI(App):
             return
         filtered = f" where {where}" if where else ""
         order = " · newest first" if newest_first else ""
+        # Say when the rows came the other way round, so a stale connection is
+        # visible rather than silently papered over.
+        note = (
+            " · [yellow]read via lance (recreated since this app connected)[/yellow]"
+            if rescued
+            else ""
+        )
         info.update(
             f"[b]{name}[/b]{filtered} — {total} rows × {len(cols)} cols "
-            f"(showing {len(rows)}{order})"
+            f"(showing {len(rows)}{order}){note}"
         )
         if cols:
             grid.add_columns(*cols)
