@@ -493,6 +493,33 @@ def test_tui_unusable_target_reports_instead_of_crashing(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_tui_recreated_table_read_explains_itself():
+    """A drop+recreate poisons this process's reads; say that, not the path.
+
+    ``table_names()`` and ``drop_table()`` keep working across a recreate —
+    only the row scan resolves the old table's fragments — so the message has
+    to point at the one thing that helps (a restart) and not imply the
+    listing or the delete tool are broken too.
+    """
+    from geneva_examples.tui.app import _read_error
+
+    stale = RuntimeError(
+        "External error: Not found: /db/images.lance/data/0111d7a7af45.lance, "
+        "/rust/lance-io/src/local.rs:133:40"
+    )
+    msg = _read_error("images", stale)
+    assert "recreated after this app connected" in msg
+    assert "Restart `uv run tui`" in msg
+    assert ".lance" not in msg  # the unactionable path is not what we show
+
+    # anything else keeps its own message, typed
+    other = ValueError("something else entirely")
+    assert _read_error("images", other) == "ValueError: something else entirely"
+    # and a missing file that isn't this table's own fragment is left alone
+    elsewhere = RuntimeError("Not found: /db/other.lance/data/abc.lance")
+    assert _read_error("images", elsewhere).startswith("RuntimeError:")
+
+
 def _delete_tool(monkeypatch, tables: list[str]):
     """A fake backend for the Tools → Delete Table app; returns the connection."""
     from _fakes import FakeConn, FakeTable

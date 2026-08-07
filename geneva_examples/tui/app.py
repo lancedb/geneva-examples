@@ -135,6 +135,33 @@ _STATUS_STYLES = {
 }
 
 
+def _read_error(name: str, exc: Exception) -> str:
+    """The message for a failed table read, naming the cause we can recognize.
+
+    Dropping a table and recreating it at the same path leaves this process
+    resolving the *previous* manifest: the scan then asks for fragment files
+    that were deleted with the old table, and reports a path the reader can do
+    nothing with. It is not transient and it is not repairable from here —
+    ``checkout_latest()``, a fresh ``lancedb.Session``, ``index_cache_size``
+    and ``read_consistency_interval=0`` were all tried, and only a new process
+    reads the table again (plain ``lance.dataset()`` is unaffected, so the
+    stale state is above Lance, in the geneva/lancedb connection layer).
+
+    ``table_names()`` and ``drop_table()`` stay correct throughout, so the
+    Tables *listing* and the Delete Table tool keep working — it is only the
+    row scan that breaks. Say so, rather than printing the missing fragment.
+    """
+    text = str(exc)
+    if "Not found:" in text and f"{name}.lance/data/" in text:
+        return (
+            f"{name} was recreated after this app connected, so the read is "
+            "still resolving the old table's files. Restart `uv run tui` to see "
+            "it — refreshing here cannot clear that cache. (Listing and delete "
+            "are unaffected.)"
+        )
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _deletable(names: list[str]) -> list[str]:
     """The table names the delete tool may offer, system tables removed.
 
@@ -752,7 +779,7 @@ class GenevaTUI(App):
                 rows = query.select(cols).limit(_TABLE_ROW_LIMIT).to_list()
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the info line
-            cols, rows, total, err = [], [], 0, f"{type(exc).__name__}: {exc}"
+            cols, rows, total, err = [], [], 0, _read_error(name, exc)
             ts_col = None
         self._post(
             epoch, self._show_table, name, cols, rows, total, err, where, bool(ts_col)
