@@ -1,6 +1,6 @@
 """Textual TUI: browse/run example pipelines, view database tables, inspect jobs.
 
-The left nav has three sections:
+The left nav has four sections:
 
 * **Tables** — a read-only viewer, and the view the app opens on (with a fresh
   listing). *Refresh* lists the tables in the connected database (using the
@@ -10,6 +10,10 @@ The left nav has three sections:
   streaming log API, so the record's append-only event list *is* the log).
   *Refresh* lists recent jobs newest-first across every status; selecting one
   shows its full record, and ``f`` follows a running job by re-reading it.
+* **Tools** — small apps that *change* the database rather than read it. Today
+  that is **Delete Table**, the TUI form of ``uv run delete-table``: pick a
+  table (or type its name), then confirm the drop in a modal. Geneva's system
+  tables are neither listed there nor droppable through it.
 * **Examples** — a tree of examples → steps (from the registry). Selecting a step
   shows its markdown description and a form built from its ``Param`` spec; **Run**
   launches the step's generated CLI in a subprocess and streams its output.
@@ -35,6 +39,7 @@ from typing import ClassVar
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -44,6 +49,7 @@ from textual.widgets import (
     Input,
     Label,
     Markdown,
+    OptionList,
     RichLog,
     Select,
     Static,
@@ -95,6 +101,7 @@ _SYSTEM_TABLES = {
 _DETAIL_PLACEHOLDER = "select a cell to see its full value"
 _JOB_PLACEHOLDER = "select a job on the left (press [b]j[/b] to list them)"
 _TABLE_PLACEHOLDER = "select a table on the left (press [b]t[/b] to list them)"
+_DELETE_PLACEHOLDER = "press [b]Refresh ⟳[/b] to list the tables on this backend"
 
 
 def _target_label(cfg) -> str:
@@ -169,6 +176,51 @@ def _fetch_newest_first(
     return len(index), rows
 
 
+class ConfirmDelete(ModalScreen[bool]):
+    """The "are you sure?" gate in front of a table drop.
+
+    A modal rather than an inline prompt: dropping a table is the one action in
+    this app that destroys data and cannot be undone, so it should interrupt
+    rather than sit as another control the eye can skip past. Dismisses ``True``
+    only if the Delete button is pressed; Cancel and Escape dismiss ``False``.
+    """
+
+    BINDINGS: ClassVar = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self._name = name
+
+    def compose(self) -> ComposeResult:
+        from rich.text import Text
+
+        with Vertical(id="confirm-box"):
+            # Text, not markup: a table name is a geneva-supplied string, and a
+            # stray bracket in one would otherwise be parsed as a markup tag.
+            yield Static(
+                Text(f"Are you sure you want to delete {self._name}?"),
+                id="confirm-question",
+            )
+            yield Static(
+                "This permanently drops the table and every row in it.",
+                classes="field-label",
+            )
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Cancel", id="confirm-no")
+                yield Button("Delete", variant="error", id="confirm-yes")
+
+    @on(Button.Pressed, "#confirm-yes")
+    def _on_yes(self, _event: Button.Pressed) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#confirm-no")
+    def _on_no(self, _event: Button.Pressed) -> None:
+        self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class GenevaTUI(App):
     """Interactive runner + table viewer for the geneva-examples pipelines."""
 
@@ -191,6 +243,17 @@ class GenevaTUI(App):
     #cell-detail.expanded { min-height: 60%; max-height: 85%; }
     #job-info { height: auto; padding: 0 0 1 0; }
     #job-detail { height: 1fr; border-top: solid $panel; padding: 0 1; }
+    #delete-info { height: auto; padding: 0 0 1 0; color: $text-muted; }
+    #delete-list { height: 1fr; border: solid $panel; }
+    #delete-actions { height: auto; padding: 1 0; }
+    #delete-actions Input { width: 1fr; margin-right: 1; }
+    #delete-status { height: auto; min-height: 1; }
+    ConfirmDelete { align: center middle; }
+    #confirm-box { width: 64; height: auto; padding: 1 2;
+                   border: thick $error; background: $surface; }
+    #confirm-question { text-style: bold; }
+    #confirm-buttons { height: auto; align-horizontal: right; padding-top: 1; }
+    #confirm-buttons Button { margin-left: 1; }
     .field-label { color: $text-muted; }
     """
 
@@ -216,6 +279,10 @@ class GenevaTUI(App):
         # so the detail pane resolves full values from these by coordinate.
         self._table_cols: list[str] = []
         self._table_rows: list[dict] = []
+        self._tools_node = None
+        # The delete tool's own listing — what it will accept as a target, so a
+        # typed name is checked against the same set the list offers.
+        self._delete_names: list[str] = []
         self._jobs_node = None
         self._current_job: str | None = None
         self._current_job_terminal = True
@@ -265,6 +332,19 @@ class GenevaTUI(App):
                         yield Static(_JOB_PLACEHOLDER, id="job-info")
                         with VerticalScroll(id="job-detail"):
                             yield Static("", id="job-detail-value")
+                    with Vertical(id="tool-pane"):
+                        yield Static(_DELETE_PLACEHOLDER, id="delete-info")
+                        yield OptionList(id="delete-list")
+                        with Horizontal(id="delete-actions"):
+                            yield Input(
+                                placeholder=(
+                                    "table to delete — pick one above, "
+                                    "or type its name and press Enter"
+                                ),
+                                id="delete-name",
+                            )
+                            yield Button("Delete", variant="error", id="delete-go")
+                        yield Static("", id="delete-status")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -287,6 +367,13 @@ class GenevaTUI(App):
         # demand (unlike Tables) so startup opens exactly one connection.
         self._jobs_node = tree.root.add("Jobs", expand=True)
         self._jobs_node.add_leaf("↻ refresh", data=("jobs-refresh",))
+
+        # Tools sits above Examples, not below: the examples tree is long
+        # enough to push anything after it off a normal terminal. Its leaves
+        # are fixed apps, not a listing, so there is no refresh leaf here —
+        # each tool lists whatever it needs when you open it.
+        self._tools_node = tree.root.add("Tools", expand=True)
+        self._tools_node.add_leaf("Delete Table", data=("tool", "delete-table"))
 
         examples = tree.root.add("Examples", expand=True)
         first: tuple[Example, Step] | None = None
@@ -335,6 +422,10 @@ class GenevaTUI(App):
             switcher.current = "job-pane"
             run_button.label = "Refresh ⟳"
             self._select_job(data[1])
+        elif kind == "tool":
+            switcher.current = "tool-pane"
+            run_button.label = "Refresh ⟳"
+            self._refresh_delete_tables()
         elif kind == "tables-refresh":
             self._refresh_tables()
         elif kind == "table":
@@ -410,8 +501,11 @@ class GenevaTUI(App):
         Switching backends while reading job records means you want *that*
         backend's jobs; anywhere else, tables — the view the app opens on.
         """
-        if self.query_one("#main", ContentSwitcher).current == "job-pane":
+        pane = self.query_one("#main", ContentSwitcher).current
+        if pane == "job-pane":
             self._refresh_jobs()
+        elif pane == "tool-pane":
+            self._refresh_delete_tables()
         else:
             self._refresh_tables()
 
@@ -462,6 +556,15 @@ class GenevaTUI(App):
         self.query_one("#cell-value", Static).update(_DETAIL_PLACEHOLDER)
         self.query_one("#job-info", Static).update(_JOB_PLACEHOLDER)
         self.query_one("#job-detail-value", Static).update("")
+        self._clear_delete_tool()
+
+    def _clear_delete_tool(self) -> None:
+        """Empty the delete tool — its listing named the previous database."""
+        self._delete_names = []
+        self.query_one("#delete-list", OptionList).clear_options()
+        self.query_one("#delete-name", Input).value = ""
+        self.query_one("#delete-info", Static).update(_DELETE_PLACEHOLDER)
+        self.query_one("#delete-status", Static).update("")
 
     def _post(self, epoch: int, callback, *args) -> None:
         """Hand a worker's result to the UI unless the target moved under it.
@@ -867,6 +970,134 @@ class GenevaTUI(App):
             return
         self._load_job(cfg, self._current_job, self._epoch)
 
+    # --- tools: delete table ----------------------------------------------
+
+    def _refresh_delete_tables(self) -> None:
+        """List what the delete tool is allowed to drop on this backend."""
+        cfg, err = self._cfg()
+        if err:
+            self._set_delete_tables([], err)
+        else:
+            self._list_delete_tables(cfg, self._epoch)
+
+    @work(thread=True, group="tools")
+    def _list_delete_tables(self, cfg, epoch: int = 0) -> None:
+        try:
+            names = sorted(connect(cfg).table_names())
+            err = None
+        except Exception as exc:  # noqa: BLE001 - surface to the pane
+            names, err = [], f"{type(exc).__name__}: {exc}"
+        # geneva's system tables live in their own namespace, so table_names()
+        # does not return them today — filter anyway, so the tool never offers
+        # one if that ever changes. _request_delete refuses them by name too.
+        names = [n for n in names if n not in _SYSTEM_TABLES]
+        self._post(epoch, self._set_delete_tables, names, err)
+
+    def _set_delete_tables(self, names: list[str], err: str | None) -> None:
+        from rich.text import Text
+
+        self._delete_names = list(names)
+        info = self.query_one("#delete-info", Static)
+        options = self.query_one("#delete-list", OptionList)
+        options.clear_options()
+        if err:
+            info.update(Text(err, style="red"))
+        elif not names:
+            info.update("no deletable tables on this backend")
+        else:
+            info.update(
+                f"{len(names)} table(s) on {self._target[0]} — "
+                "pick one, or type its name below"
+            )
+            # Text prompts, so a bracket in a table name is not read as markup.
+            options.add_options([Text(n) for n in names])
+
+    @on(OptionList.OptionSelected, "#delete-list")
+    def _on_delete_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Clicking a listed table fills the name box rather than deleting it.
+
+        Selection and deletion stay separate actions: a stray Enter in a list
+        should never be one keypress away from dropping a table.
+        """
+        if 0 <= event.option_index < len(self._delete_names):
+            self.query_one("#delete-name", Input).value = self._delete_names[
+                event.option_index
+            ]
+            self.query_one("#delete-status", Static).update("")
+
+    @on(Input.Submitted, "#delete-name")
+    def _on_delete_name_submitted(self, _event: Input.Submitted) -> None:
+        self._request_delete()
+
+    @on(Button.Pressed, "#delete-go")
+    def _on_delete_pressed(self, _event: Button.Pressed) -> None:
+        self._request_delete()
+
+    def _request_delete(self) -> None:
+        """Validate the named table, then put the confirmation modal in front."""
+        from rich.text import Text
+
+        name = self.query_one("#delete-name", Input).value.strip()
+        status = self.query_one("#delete-status", Static)
+        if not name:
+            status.update(Text("pick a table above, or type its name", "yellow"))
+            return
+        if name in _SYSTEM_TABLES:
+            # The job records and the per-row error store: geneva's own
+            # bookkeeping, browsable from the Tables section but not ours to
+            # drop. Dropping one loses the history every job view reads.
+            status.update(
+                Text(f"{name} is a geneva system table — it can't be deleted", "red")
+            )
+            return
+        if name not in self._delete_names:
+            status.update(Text(f"no table named {name!r} on this backend", "red"))
+            return
+        status.update("")
+        self.push_screen(ConfirmDelete(name), lambda ok: self._on_confirmed(name, ok))
+
+    def _on_confirmed(self, name: str, confirmed: bool | None) -> None:
+        """Run the drop, once the modal comes back with a yes."""
+        if not confirmed:
+            return
+        cfg, err = self._cfg()
+        if err:
+            self._table_deleted(name, err)
+            return
+        self.query_one("#delete-status", Static).update(f"deleting {name}…")
+        self._delete_table(cfg, name, self._epoch)
+
+    @work(thread=True, group="tools")
+    def _delete_table(self, cfg, name: str, epoch: int = 0) -> None:
+        try:
+            connect(cfg).drop_table(name)
+            err = None
+        except Exception as exc:  # noqa: BLE001 - surface to the pane
+            err = f"{type(exc).__name__}: {exc}"
+        self._post(epoch, self._table_deleted, name, err)
+
+    def _table_deleted(self, name: str, err: str | None) -> None:
+        from rich.text import Text
+
+        status = self.query_one("#delete-status", Static)
+        if err:
+            status.update(Text(f"{name}: {err}", "red"))
+            return
+        status.update(Text(f"dropped {name}", "green"))
+        self.query_one("#delete-name", Input).value = ""
+        self.notify(f"dropped {name}")
+        # The table is gone from every listing that named it — including the
+        # viewer, if that is what it happened to be showing.
+        if self._current_table == name:
+            self._current_table = None
+            self._current_table_system = False
+            self._table_cols, self._table_rows = [], []
+            self.query_one("#table-info", Static).update(_TABLE_PLACEHOLDER)
+            self.query_one("#table-view", DataTable).clear(columns=True)
+            self.query_one("#cell-value", Static).update(_DETAIL_PLACEHOLDER)
+        self._refresh_delete_tables()
+        self._refresh_tables()
+
     # --- running ----------------------------------------------------------
 
     def write_log(self, message: str) -> None:
@@ -911,6 +1142,9 @@ class GenevaTUI(App):
                 )
             else:
                 self._refresh_tables()
+            return
+        if pane == "tool-pane":
+            self._refresh_delete_tables()
             return
         if self._current is None:
             return

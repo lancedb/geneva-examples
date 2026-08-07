@@ -14,13 +14,14 @@ from textual.widgets import (
     ContentSwitcher,
     DataTable,
     Input,
+    OptionList,
     Select,
     Static,
     Tree,
 )
 
 from geneva_examples.core.config import Config
-from geneva_examples.tui.app import GenevaTUI
+from geneva_examples.tui.app import ConfirmDelete, GenevaTUI
 
 
 def _stub_config(monkeypatch) -> None:
@@ -70,7 +71,8 @@ def test_tui_mounts_examples_and_tables_sections(monkeypatch):
             await pilot.pause()
             tree = app.query_one("#nav", Tree)
             sections = [n.label.plain for n in tree.root.children]
-            assert sections == ["Tables", "Jobs", "Examples"]  # tables lead the nav
+            # tables lead the nav; Tools sits above the long Examples tree
+            assert sections == ["Tables", "Jobs", "Tools", "Examples"]
             # the app opens on the Tables view and refreshes the listing
             assert app.query_one("#main", ContentSwitcher).current == "table-pane"
             assert str(app.query_one("#run", Button).label) == "Refresh ⟳"
@@ -80,7 +82,10 @@ def test_tui_mounts_examples_and_tables_sections(monkeypatch):
             # Jobs are listed on demand, so only the refresh leaf is there
             jobs_node = tree.root.children[1]
             assert [n.label.plain for n in jobs_node.children] == ["↻ refresh"]
-            examples_node = tree.root.children[2]
+            # Tools are fixed apps, not a listing — no refresh leaf
+            tools_node = tree.root.children[2]
+            assert [n.label.plain for n in tools_node.children] == ["Delete Table"]
+            examples_node = tree.root.children[3]
             # images, video, pdf, audio, debugging
             assert len(examples_node.children) == 5
 
@@ -484,6 +489,186 @@ def test_tui_unusable_target_reports_instead_of_crashing(monkeypatch):
             await pilot.pause()
             info = str(app.query_one("#job-info", Static)._content)
             assert "config file not found" in info
+
+    asyncio.run(scenario())
+
+
+def _delete_tool(monkeypatch, tables: list[str]):
+    """A fake backend for the Tools → Delete Table app; returns the connection."""
+    from _fakes import FakeConn, FakeTable
+
+    from geneva_examples.tui import app as tui_app
+
+    _stub_config(monkeypatch)
+    _quiet_tables(monkeypatch)
+    conn = FakeConn(tables={name: FakeTable() for name in tables}, is_remote=False)
+    monkeypatch.setattr(tui_app, "connect", lambda _cfg: conn)
+    return conn
+
+
+async def _open_delete_tool(app, pilot):
+    """Select Tools → Delete Table and wait for its listing to land."""
+    tools_node = app.query_one("#nav", Tree).root.children[2]
+    app.query_one("#nav", Tree).select_node(tools_node.children[0])
+    for _ in range(50):
+        await pilot.pause(0.1)
+        if app._delete_names:
+            break
+
+
+def test_tui_delete_tool_lists_tables_and_hides_system_tables(monkeypatch):
+    """The tool offers real tables only — geneva's own bookkeeping is not listed."""
+    _delete_tool(monkeypatch, ["videos", "geneva_jobs", "images"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            assert app.query_one("#main", ContentSwitcher).current == "tool-pane"
+            assert app._delete_names == ["images", "videos"]  # geneva_jobs filtered
+            options = app.query_one("#delete-list", OptionList)
+            assert options.option_count == 2
+
+            # clicking a listed table fills the name box, it does not delete
+            options.focus()
+            app.post_message(OptionList.OptionSelected(options, 1))
+            await pilot.pause()
+            assert app.query_one("#delete-name", Input).value == "videos"
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_confirms_before_dropping(monkeypatch):
+    """Delete puts the modal up first, and only a Yes reaches drop_table."""
+    conn = _delete_tool(monkeypatch, ["videos", "images"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            app.query_one("#delete-name", Input).value = "videos"
+            app.query_one("#delete-go", Button).press()
+            await pilot.pause()
+
+            # the modal names the table, and nothing is dropped while it is up
+            assert isinstance(app.screen, ConfirmDelete)
+            question = str(app.screen.query_one("#confirm-question", Static)._content)
+            assert question == "Are you sure you want to delete videos?"
+            assert conn.dropped == []
+
+            app.screen.query_one("#confirm-yes", Button).press()
+            for _ in range(50):
+                await pilot.pause(0.1)
+                if conn.dropped:
+                    break
+            assert conn.dropped == ["videos"]
+            status = str(app.query_one("#delete-status", Static)._content)
+            assert "dropped videos" in status
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_cancel_drops_nothing(monkeypatch):
+    conn = _delete_tool(monkeypatch, ["videos"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            app.query_one("#delete-name", Input).value = "videos"
+            app.query_one("#delete-go", Button).press()
+            await pilot.pause()
+            app.screen.query_one("#confirm-no", Button).press()
+            await pilot.pause()
+
+            assert not isinstance(app.screen, ConfirmDelete)
+            assert conn.dropped == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_refuses_a_system_table(monkeypatch):
+    """Typing a system table's name is refused before the modal is even raised."""
+    conn = _delete_tool(monkeypatch, ["videos"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            app.query_one("#delete-name", Input).value = "geneva_errors"
+            app.query_one("#delete-go", Button).press()
+            await pilot.pause()
+
+            assert not isinstance(app.screen, ConfirmDelete)
+            status = str(app.query_one("#delete-status", Static)._content)
+            assert "geneva_errors is a geneva system table" in status
+            assert conn.dropped == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_refuses_an_unknown_table(monkeypatch):
+    conn = _delete_tool(monkeypatch, ["videos"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            app.query_one("#delete-name", Input).value = "nope"
+            app.query_one("#delete-go", Button).press()
+            await pilot.pause()
+
+            assert not isinstance(app.screen, ConfirmDelete)
+            status = str(app.query_one("#delete-status", Static)._content)
+            assert "no table named 'nope'" in status
+            assert conn.dropped == []
+
+            # and an empty box just asks for a name
+            app.query_one("#delete-name", Input).value = "   "
+            app.query_one("#delete-go", Button).press()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmDelete)
+            assert conn.dropped == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_is_relisted_when_the_backend_changes(monkeypatch):
+    """The tool's listing belongs to one database, like every other listing.
+
+    A name typed against local mode must not survive into enterprise, where it
+    may not exist — or worse, may name a different table.
+    """
+    _delete_tool(monkeypatch, ["videos"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+            app.query_one("#delete-name", Input).value = "videos"
+
+            # Hold the re-listing so the cleared state is observable; the switch
+            # would otherwise immediately repopulate from the (same) fake conn.
+            relisted: list = []
+            app._list_delete_tables = lambda cfg, epoch=0: relisted.append(cfg)
+            app.query_one("#mode", Select).value = "enterprise"
+            await pilot.pause()
+
+            assert app._delete_names == []
+            assert app.query_one("#delete-name", Input).value == ""
+            assert app.query_one("#delete-list", OptionList).option_count == 0
+            assert len(relisted) == 1  # re-listed for the newly selected backend
 
     asyncio.run(scenario())
 

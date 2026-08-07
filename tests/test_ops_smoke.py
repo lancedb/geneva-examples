@@ -46,7 +46,7 @@ def test_stats_cli_summarizes_tables(
 
 @pytest.mark.parametrize(
     ("module_name", "extra_argv"),
-    [("stats", []), ("cleanup", ["--yes"]), ("jobs", [])],
+    [("stats", []), ("cleanup", ["--yes"]), ("delete_table", ["--yes"]), ("jobs", [])],
 )
 def test_ops_cli_forwards_db_uri_override_to_load_config(
     module_name: str,
