@@ -25,11 +25,12 @@ What's here:
      [`examples/_shared/`](geneva_examples/examples/_shared/)
 2. **A Textual TUI** (`uv run tui`) that lists the examples, shows each step's
    description, renders a parameter form, and runs it with live logs — plus
-   read-only **Tables** and **Jobs** browsers for inspecting the result.
+   read-only **Tables** and **Jobs** browsers for inspecting the result, and a
+   **Tools** section (Delete Table).
 3. **Generated CLIs** — every step is also a `uv run <name>` command, generated
    from the same spec (one source of truth for params + descriptions).
-4. **Two inspection CLIs** — `stats` and `jobs` — plus `cleanup`, that read/manage
-   table/job state.
+4. **Two inspection CLIs** — `stats` and `jobs` — plus `cleanup` and
+   `delete-table`, that read/manage table/job state.
 5. **UDF Studio** — a Gradio app for prototyping UDFs/chunkers locally before
    promoting them into an example (see below).
 
@@ -114,8 +115,8 @@ geneva-examples/
 │   │   ├── images/                   # __init__ (spec) + imageinfo + ingest/lightweight/embed/caption
 │   │   ├── video/                    # spec + chunkers (bytes/blob/URI) + ingest/chunk (+ openvid/external) + frame-*/seed
 │   │   └── pdf/                      # spec + document UDFs + ingest/chunk
-│   ├── tui/                          # Textual TUI: Tables/Jobs/Examples nav (app.py) + form helpers (forms.py)
-│   ├── ops/                          # inspection/teardown CLIs: stats, jobs, cleanup
+│   ├── tui/                          # Textual TUI: Tables/Jobs/Tools/Examples nav (app.py) + form helpers (forms.py)
+│   ├── ops/                          # inspection/teardown CLIs: stats, jobs, cleanup, delete-table
 │   └── apps/                         # local (non-cluster) apps
 │       ├── udf_studio.py             # Gradio prototyping app (Typer entrypoint + UI)
 │       └── studio/                   # runner / samples / templates / library
@@ -245,8 +246,8 @@ uv run tui
 ```
 
 A Textual app to browse, describe, tune, and run every example without
-remembering command names. The left nav has three sections — **Tables**,
-**Jobs**, and **Examples** — and the app opens on Tables:
+remembering command names. The left nav has four sections — **Tables**,
+**Jobs**, **Tools**, and **Examples** — and the app opens on Tables:
 
 - **controls** — mode (local/enterprise), config path, db-uri, log level. These
   choose the database, and the header names the one you are on. Changing any of
@@ -267,6 +268,22 @@ remembering command names. The left nav has three sections — **Tables**,
   and the complete event log — which, since Geneva has no streaming log API, *is*
   the log. Press `f` to follow a still-running job; it re-reads the record every
   few seconds and stops on its own once the job is DONE/FAILED/CANCELLED.
+- **Tools** — small apps that *change* the database rather than read it. Today
+  that is **Delete Table**, the TUI form of `uv run delete-table`: pick a table
+  from the list (or type its name), press **Delete**, and confirm in a modal
+  that names the table. Geneva's system tables are neither listed there nor
+  accepted if you type one, and the listing is dropped whenever you switch
+  backends.
+
+Deleting a table and recreating it at the same name — the `delete-table` then
+`ingest-*` loop — leaves the *running* app resolving the old table's files, so
+a row scan asks for fragments that no longer exist. `table_names()` and
+`drop_table()` stay correct, so the listing and the delete tool keep working;
+only the scan breaks, and it stays broken for the life of the process. In local
+mode the viewer falls back to reading the table through Lance and says so in the
+info line (`read via lance`). Enterprise reads and the system tables have no
+local path to fall back to, so there the pane explains the cause and asks you to
+restart `uv run tui`.
 
 Every step is *also* a plain command (below), generated from the same spec — so
 `uv run <name>` and the TUI always agree on parameters and descriptions. The
@@ -351,8 +368,18 @@ uv run jobs tail <job_id>      # follow a job's events until it reaches a termin
 uv run jobs kill <job_id>      # cancel a job (prompts; -y to skip, --force if already terminal)
 ```
 
+Two teardown commands sit alongside them:
+
+```bash
+uv run cleanup                 # drop the example tables in one go (videos, video_clips, + _mv siblings)
+uv run delete-table            # list this backend's tables, pick one by name or number, confirm, drop
+uv run delete-table images     # skip the picker, still confirms (add -y to skip that too)
+```
+
 `stats` defaults to the example tables (`images`, `videos`, `video_clips`) and
-skips any that are absent. Both CLIs connect via `config.yaml` (override with
+skips any that are absent. `delete-table` drops exactly the one table you pick —
+a chunker's materialized view appears in its list as `<name>_mv` and is dropped
+the same way. All four CLIs connect via `config.yaml` (override with
 `--config`/`--db-uri`).
 
 The TUI's **Jobs** section is the same view without the command names: `uv run

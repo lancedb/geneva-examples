@@ -50,7 +50,7 @@ Example (video)
 | `geneva_examples/examples/video/chunkers*.py`, `.../udfs/` | The UDF/UDTF *factories*. |
 | `geneva_examples/examples/cli.py` | `build_command(EXAMPLE, STEP)` per command. **Registration point #2.** |
 | `pyproject.toml` `[project.scripts]` | Maps `uv run <name>` → `cli.py:<command>`. **Registration point #3.** |
-| `geneva_examples/ops/` | Cross-cutting ops CLIs: `jobs` (list/cancel), `cleanup`, `stats`. |
+| `geneva_examples/ops/` | Cross-cutting ops CLIs: `jobs` (list/cancel), `cleanup`, `delete-table`, `stats`. |
 | `geneva_examples/tui/app.py` | `uv run tui` — interactive runner, renders from the same specs. |
 
 ---
@@ -248,7 +248,8 @@ Job pod on the cluster**, not your client — your client only streams progress 
   <…refresh…-pod> -f`), the worker pods / Ray dashboard (`raycluster-head-svc:8265`), or
   the `mf` CLI. Central sinks (Grafana/Oodle) receive them only if the cluster's OTEL
   collector (`LANCEDB_OTEL_COLLECTOR_URL`) is wired.
-- **Ops CLIs**: `uv run jobs` (list/cancel), `uv run cleanup`, `uv run stats`.
+- **Ops CLIs**: `uv run jobs` (list/cancel), `uv run cleanup`, `uv run delete-table`
+  (pick one table off the backend and drop it), `uv run stats`.
 
 **Batching many jobs**: each Step is idempotent-ish and parameterized, so a driver script
 can loop over inputs/params and call the `run()` functions (or `uv run <cmd>`) directly —
