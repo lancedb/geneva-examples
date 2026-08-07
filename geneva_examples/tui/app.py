@@ -135,6 +135,16 @@ _STATUS_STYLES = {
 }
 
 
+def _deletable(names: list[str]) -> list[str]:
+    """The table names the delete tool may offer, system tables removed.
+
+    geneva's system tables live in their own namespace, so ``table_names()``
+    does not return them today — filtered anyway, so the tool never offers one
+    if that changes. ``_request_delete`` refuses them by name as well.
+    """
+    return [n for n in names if n not in _SYSTEM_TABLES]
+
+
 def _open_any_table(conn, name: str, *, system: bool = False):
     """Open a regular table, or a geneva system table via its namespace."""
     if not system:
@@ -561,10 +571,10 @@ class GenevaTUI(App):
     def _clear_delete_tool(self) -> None:
         """Empty the delete tool — its listing named the previous database."""
         self._delete_names = []
-        self.query_one("#delete-list", OptionList).clear_options()
-        self.query_one("#delete-name", Input).value = ""
-        self.query_one("#delete-info", Static).update(_DELETE_PLACEHOLDER)
-        self.query_one("#delete-status", Static).update("")
+        self._pane("#delete-list", OptionList).clear_options()
+        self._pane("#delete-name", Input).value = ""
+        self._pane("#delete-info", Static).update(_DELETE_PLACEHOLDER)
+        self._pane("#delete-status", Static).update("")
 
     def _post(self, epoch: int, callback, *args) -> None:
         """Hand a worker's result to the UI unless the target moved under it.
@@ -972,6 +982,15 @@ class GenevaTUI(App):
 
     # --- tools: delete table ----------------------------------------------
 
+    def _pane(self, selector: str, kind):
+        """Query the app's own screen, not whatever is on top of it.
+
+        ``App.query_one`` resolves against the topmost screen, so every lookup
+        into the tool pane would fail while ``ConfirmDelete`` is up — and a
+        listing that lands from a worker mid-confirmation does exactly that.
+        """
+        return self.screen_stack[0].query_one(selector, kind)
+
     def _refresh_delete_tables(self) -> None:
         """List what the delete tool is allowed to drop on this backend."""
         cfg, err = self._cfg()
@@ -983,22 +1002,18 @@ class GenevaTUI(App):
     @work(thread=True, group="tools")
     def _list_delete_tables(self, cfg, epoch: int = 0) -> None:
         try:
-            names = sorted(connect(cfg).table_names())
+            names = _deletable(sorted(connect(cfg).table_names()))
             err = None
         except Exception as exc:  # noqa: BLE001 - surface to the pane
             names, err = [], f"{type(exc).__name__}: {exc}"
-        # geneva's system tables live in their own namespace, so table_names()
-        # does not return them today — filter anyway, so the tool never offers
-        # one if that ever changes. _request_delete refuses them by name too.
-        names = [n for n in names if n not in _SYSTEM_TABLES]
         self._post(epoch, self._set_delete_tables, names, err)
 
     def _set_delete_tables(self, names: list[str], err: str | None) -> None:
         from rich.text import Text
 
         self._delete_names = list(names)
-        info = self.query_one("#delete-info", Static)
-        options = self.query_one("#delete-list", OptionList)
+        info = self._pane("#delete-info", Static)
+        options = self._pane("#delete-list", OptionList)
         options.clear_options()
         if err:
             info.update(Text(err, style="red"))
@@ -1020,10 +1035,10 @@ class GenevaTUI(App):
         should never be one keypress away from dropping a table.
         """
         if 0 <= event.option_index < len(self._delete_names):
-            self.query_one("#delete-name", Input).value = self._delete_names[
+            self._pane("#delete-name", Input).value = self._delete_names[
                 event.option_index
             ]
-            self.query_one("#delete-status", Static).update("")
+            self._pane("#delete-status", Static).update("")
 
     @on(Input.Submitted, "#delete-name")
     def _on_delete_name_submitted(self, _event: Input.Submitted) -> None:
@@ -1034,23 +1049,61 @@ class GenevaTUI(App):
         self._request_delete()
 
     def _request_delete(self) -> None:
-        """Validate the named table, then put the confirmation modal in front."""
+        """Check the named table against the backend, then raise the modal."""
         from rich.text import Text
 
-        name = self.query_one("#delete-name", Input).value.strip()
-        status = self.query_one("#delete-status", Static)
+        name = self._pane("#delete-name", Input).value.strip()
+        status = self._pane("#delete-status", Static)
         if not name:
             status.update(Text("pick a table above, or type its name", "yellow"))
             return
         if name in _SYSTEM_TABLES:
             # The job records and the per-row error store: geneva's own
             # bookkeeping, browsable from the Tables section but not ours to
-            # drop. Dropping one loses the history every job view reads.
+            # drop. Dropping one loses the history every job view reads. A
+            # name-based rule, so it needs no read to enforce.
             status.update(
                 Text(f"{name} is a geneva system table — it can't be deleted", "red")
             )
             return
-        if name not in self._delete_names:
+        cfg, err = self._cfg()
+        if err:
+            status.update(Text(err, "red"))
+            return
+        status.update(f"checking {name}…")
+        self._verify_target(cfg, name, self._epoch)
+
+    @work(thread=True, group="tools")
+    def _verify_target(self, cfg, name: str, epoch: int = 0) -> None:
+        """Re-read the table list so the verdict describes the database *now*.
+
+        The pane's listing is a snapshot from the last refresh. Deciding
+        against it means a table recreated since — by ``ingest-images`` in a
+        terminal, or by this app's own Examples runner, which shells out to the
+        step CLI — gets refused as "no such table" while the Tables section
+        sitting right next to it plainly lists the thing. So the check that
+        gates a drop reads the backend rather than trusting the snapshot, and
+        the pane is repainted from the same read.
+        """
+        try:
+            names = _deletable(sorted(connect(cfg).table_names()))
+            err = None
+        except Exception as exc:  # noqa: BLE001 - surface to the pane
+            names, err = [], f"{type(exc).__name__}: {exc}"
+        self._post(epoch, self._confirm_target, name, names, err)
+
+    def _confirm_target(self, name: str, names: list[str], err: str | None) -> None:
+        from rich.text import Text
+
+        status = self._pane("#delete-status", Static)
+        if err:
+            status.update(Text(err, "red"))
+            return
+        # Repaint the list from the read that just decided this, so what the
+        # pane offers and what it will accept can never disagree.
+        self._set_delete_tables(names, None)
+        self._pane("#delete-name", Input).value = name
+        if name not in names:
             status.update(Text(f"no table named {name!r} on this backend", "red"))
             return
         status.update("")
@@ -1064,7 +1117,7 @@ class GenevaTUI(App):
         if err:
             self._table_deleted(name, err)
             return
-        self.query_one("#delete-status", Static).update(f"deleting {name}…")
+        self._pane("#delete-status", Static).update(f"deleting {name}…")
         self._delete_table(cfg, name, self._epoch)
 
     @work(thread=True, group="tools")
@@ -1079,12 +1132,12 @@ class GenevaTUI(App):
     def _table_deleted(self, name: str, err: str | None) -> None:
         from rich.text import Text
 
-        status = self.query_one("#delete-status", Static)
+        status = self._pane("#delete-status", Static)
         if err:
             status.update(Text(f"{name}: {err}", "red"))
             return
         status.update(Text(f"dropped {name}", "green"))
-        self.query_one("#delete-name", Input).value = ""
+        self._pane("#delete-name", Input).value = ""
         self.notify(f"dropped {name}")
         # The table is gone from every listing that named it — including the
         # viewer, if that is what it happened to be showing.

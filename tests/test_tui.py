@@ -516,6 +516,24 @@ async def _open_delete_tool(app, pilot):
             break
 
 
+def _status(app) -> str:
+    """The tool's status line, read off the app's own screen.
+
+    ``app.query_one`` resolves against the topmost screen, so this has to go
+    through ``screen_stack[0]`` to stay readable while the modal is up.
+    """
+    return str(app.screen_stack[0].query_one("#delete-status", Static)._content)
+
+
+async def _press_delete(app, pilot):
+    """Press Delete and wait out the live re-check that gates the modal."""
+    app.screen_stack[0].query_one("#delete-go", Button).press()
+    for _ in range(50):
+        await pilot.pause(0.1)
+        if isinstance(app.screen, ConfirmDelete) or "checking" not in _status(app):
+            return
+
+
 def test_tui_delete_tool_lists_tables_and_hides_system_tables(monkeypatch):
     """The tool offers real tables only — geneva's own bookkeeping is not listed."""
     _delete_tool(monkeypatch, ["videos", "geneva_jobs", "images"])
@@ -551,8 +569,7 @@ def test_tui_delete_tool_confirms_before_dropping(monkeypatch):
             await _open_delete_tool(app, pilot)
 
             app.query_one("#delete-name", Input).value = "videos"
-            app.query_one("#delete-go", Button).press()
-            await pilot.pause()
+            await _press_delete(app, pilot)
 
             # the modal names the table, and nothing is dropped while it is up
             assert isinstance(app.screen, ConfirmDelete)
@@ -566,7 +583,7 @@ def test_tui_delete_tool_confirms_before_dropping(monkeypatch):
                 if conn.dropped:
                     break
             assert conn.dropped == ["videos"]
-            status = str(app.query_one("#delete-status", Static)._content)
+            status = _status(app)
             assert "dropped videos" in status
 
     asyncio.run(scenario())
@@ -582,8 +599,7 @@ def test_tui_delete_tool_cancel_drops_nothing(monkeypatch):
             await _open_delete_tool(app, pilot)
 
             app.query_one("#delete-name", Input).value = "videos"
-            app.query_one("#delete-go", Button).press()
-            await pilot.pause()
+            await _press_delete(app, pilot)
             app.screen.query_one("#confirm-no", Button).press()
             await pilot.pause()
 
@@ -608,7 +624,7 @@ def test_tui_delete_tool_refuses_a_system_table(monkeypatch):
             await pilot.pause()
 
             assert not isinstance(app.screen, ConfirmDelete)
-            status = str(app.query_one("#delete-status", Static)._content)
+            status = _status(app)
             assert "geneva_errors is a geneva system table" in status
             assert conn.dropped == []
 
@@ -625,11 +641,10 @@ def test_tui_delete_tool_refuses_an_unknown_table(monkeypatch):
             await _open_delete_tool(app, pilot)
 
             app.query_one("#delete-name", Input).value = "nope"
-            app.query_one("#delete-go", Button).press()
-            await pilot.pause()
+            await _press_delete(app, pilot)
 
             assert not isinstance(app.screen, ConfirmDelete)
-            status = str(app.query_one("#delete-status", Static)._content)
+            status = _status(app)
             assert "no table named 'nope'" in status
             assert conn.dropped == []
 
@@ -639,6 +654,54 @@ def test_tui_delete_tool_refuses_an_unknown_table(monkeypatch):
             await pilot.pause()
             assert not isinstance(app.screen, ConfirmDelete)
             assert conn.dropped == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_delete_tool_sees_a_table_recreated_since_the_last_refresh(monkeypatch):
+    """Delete → recreate → delete again, without touching Refresh.
+
+    Regression: the gate used to be the pane's cached listing, so a table
+    recreated behind the tool's back — `ingest-images` in a terminal, or this
+    app's own Examples runner, which shells out to the step CLI — was refused
+    as "no table named …" while the Tables section plainly listed it. The
+    check reads the backend now, and repaints the list from that same read.
+    """
+    from _fakes import FakeTable
+
+    conn = _delete_tool(monkeypatch, ["images"])
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _open_delete_tool(app, pilot)
+
+            app.query_one("#delete-name", Input).value = "images"
+            await _press_delete(app, pilot)
+            app.screen.query_one("#confirm-yes", Button).press()
+            for _ in range(50):
+                await pilot.pause(0.1)
+                if conn.dropped:
+                    break
+            assert conn.dropped == ["images"]
+            assert app._delete_names == []  # gone from the pane, correctly
+
+            # recreated behind the tool's back, with the pane never refreshed
+            conn._tables["images"] = FakeTable()
+            assert app._delete_names == []  # the snapshot is now stale
+
+            app.query_one("#delete-name", Input).value = "images"
+            await _press_delete(app, pilot)
+
+            # the live re-check finds it, so the modal comes up as it should
+            assert isinstance(app.screen, ConfirmDelete)
+            app.screen.query_one("#confirm-yes", Button).press()
+            for _ in range(50):
+                await pilot.pause(0.1)
+                if len(conn.dropped) == 2:
+                    break
+            assert conn.dropped == ["images", "images"]
 
     asyncio.run(scenario())
 
