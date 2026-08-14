@@ -16,6 +16,7 @@ def test_examples_present_in_order():
         "video",
         "pdf",
         "audio",
+        "text",
         "debugging",
     ]
 

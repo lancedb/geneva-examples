@@ -15,9 +15,10 @@ from geneva_examples.examples.audio import EXAMPLE as AUDIO
 from geneva_examples.examples.debugging import EXAMPLE as DEBUGGING
 from geneva_examples.examples.images import EXAMPLE as IMAGES
 from geneva_examples.examples.pdf import EXAMPLE as PDF
+from geneva_examples.examples.text import EXAMPLE as TEXT
 from geneva_examples.examples.video import EXAMPLE as VIDEO
 
-EXAMPLES: tuple[Example, ...] = (IMAGES, VIDEO, PDF, AUDIO, DEBUGGING)
+EXAMPLES: tuple[Example, ...] = (IMAGES, VIDEO, PDF, AUDIO, TEXT, DEBUGGING)
 
 
 def all_examples() -> tuple[Example, ...]:

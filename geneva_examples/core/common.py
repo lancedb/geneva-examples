@@ -36,7 +36,19 @@ _MEMORY_MAX_BYTES = 2**31 - 1
 
 # Third-party loggers that flood the console at INFO with per-fragment/namespace
 # chatter. Quieted to WARNING unless the user asks for --log-level DEBUG.
-_NOISY_LOGGERS = ("ray", "lancedb", "pylance", "geneva")
+# httpx/huggingface_hub/sentence_transformers are here because the model stages
+# log one INFO line per HF cache probe — dozens of them before a single embedding
+# is computed, which buries the step's own output.
+_NOISY_LOGGERS = (
+    "ray",
+    "lancedb",
+    "pylance",
+    "geneva",
+    "httpx",
+    "huggingface_hub",
+    "sentence_transformers",
+    "transformers",
+)
 
 
 def setup_logging(level: str = "INFO") -> None:

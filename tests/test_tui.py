@@ -14,9 +14,11 @@ from textual.widgets import (
     ContentSwitcher,
     DataTable,
     Input,
+    Markdown,
     OptionList,
     Select,
     Static,
+    Switch,
     Tree,
 )
 
@@ -86,8 +88,8 @@ def test_tui_mounts_examples_and_tables_sections(monkeypatch):
             tools_node = tree.root.children[2]
             assert [n.label.plain for n in tools_node.children] == ["Delete Table"]
             examples_node = tree.root.children[3]
-            # images, video, pdf, audio, debugging
-            assert len(examples_node.children) == 5
+            # images, video, pdf, audio, text, debugging
+            assert len(examples_node.children) == 6
 
             # first step auto-selected, description + form populated
             assert app._current is not None
@@ -100,6 +102,61 @@ def test_tui_mounts_examples_and_tables_sections(monkeypatch):
             await pilot.pause()
             assert "search_demo" in app._fields
             assert "query_text" in app._fields
+
+    asyncio.run(scenario())
+
+
+def test_tui_renders_the_text_example_steps(monkeypatch):
+    """The text (materialized-view) example is navigable and renders both forms.
+
+    Registering an ``Example`` is all the TUI wiring there is — the tree and the
+    parameter forms come from the same spec the CLIs use — so this asserts the
+    registry actually reaches the nav, including the typed widgets each param
+    kind produces (Switch for bools, Input for the rest).
+    """
+    _quiet_tables(monkeypatch)
+    # Textual 1.0's Markdown keeps no readable copy of the text it renders, so
+    # capture what the app writes into the description pane.
+    described: list[str] = []
+    original_update = Markdown.update
+    monkeypatch.setattr(
+        Markdown,
+        "update",
+        lambda self, markdown: (
+            described.append(markdown) if self.id == "desc" else None,
+            original_update(self, markdown),
+        )[1],
+    )
+
+    async def scenario() -> None:
+        app = GenevaTUI()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            examples_node = app.query_one("#nav", Tree).root.children[3]
+            text_node = next(
+                n for n in examples_node.children if n.data[1].name == "text"
+            )
+            assert [n.label.plain for n in text_node.children] == [
+                "ingest-products",
+                "enrich-products",
+            ]
+
+            example = text_node.data[1]
+            await app._select(example, example.step("ingest-products"))
+            await pilot.pause()
+            assert app._fields["rows"][1].value == "200"
+            assert isinstance(app._fields["overwrite"][1], Switch)
+
+            await app._select(example, example.step("enrich-products"))
+            await pilot.pause()
+            # The view/model knobs are what you'd actually tune from the TUI.
+            for name in ("view_name", "model_name", "dim", "concurrency"):
+                assert name in app._fields
+            assert app._fields["view_name"][1].value == "products_enriched_mv"
+            desc = described[-1]
+            assert "Text embeddings via a materialized view" in desc
+            assert "GPU model" in desc  # gpu=True hint
+            assert "run ingest-products first" in desc  # requires hint
 
     asyncio.run(scenario())
 
