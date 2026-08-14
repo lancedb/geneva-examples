@@ -44,7 +44,7 @@ Example (video)
 | `geneva_examples/core/spec.py` | The framework: `Example`, `Step`, `Param`, `params_from_signature`, `build_command`, `COMMON_HELP`. **Read this first.** |
 | `geneva_examples/core/config.py` | `Config` + `load_config` — parses `config.yaml` (mode, creds, `db_uri`, `storage_options`). |
 | `geneva_examples/core/common.py` | `connect`, `build_manifest`, `runtime_session`, `resolve_resources`, `local_concurrency`, `format_sample`, `setup_logging`. Shared plumbing every task uses. |
-| `geneva_examples/examples/<modality>/` | One package per modality (`video`, `images`, `pdf`). |
+| `geneva_examples/examples/<modality>/` | One package per modality (`video`, `images`, `pdf`, `audio`, `text`). |
 | `geneva_examples/examples/<modality>/__init__.py` | Defines the `Step`s and the `Example` for that modality. **Registration point #1.** |
 | `geneva_examples/examples/<modality>/<task>.py` | A task = a module with a `run(cfg, *, ...)` function. |
 | `geneva_examples/examples/video/chunkers*.py`, `.../udfs/` | The UDF/UDTF *factories*. |
@@ -191,6 +191,44 @@ Key rules:
 Three byte-source variants already exist as references:
 `chunk_video_udtf` (inline bytes), `chunk_blob_video_udtf` (Lance blob via `take_blobs`),
 and `chunk_uri_video_udtf` (opens an S3 URI on the worker).
+
+### 5b. Three places a UDF can run
+
+Same factory pattern, three different hosts for the result — pick by what the UDF
+produces, not by how it's written:
+
+| Shape | How it runs | Reference |
+|---|---|---|
+| **1:1, into the source table** | `table.add_columns({col: udf})` + `table.backfill(col)` (via `core/backfill.py`) | `images/embed.py`, `audio/synthesize.py` |
+| **1:N rows** | `@geneva.chunker` inside `conn.create_udtf_view(...)` + `view.refresh()` — geneva only runs a chunker inside a view | `video/chunk.py` |
+| **1:1, into a new view** | a batch `@geneva.udf` in `select({...})` + `conn.create_materialized_view(name, query)` + `view.refresh()` | `text/enrich.py` |
+
+The third is the plain-query materialized view. The projection handed to `select`
+maps output column names to a **column name / SQL expression (`str`)** or a
+**UDF**; geneva marshals the UDF into the view's metadata, creates the view empty,
+and runs it on `refresh`:
+
+```python
+query = src.search(None).select({
+    "product_id": "product_id",              # projected through
+    "embedding":  EmbedDescription(),        # computed on refresh
+})
+view = conn.create_materialized_view("products_enriched_mv", query)
+view.refresh(concurrency=4)                   # <- the UDF executes here
+```
+
+Choose it over a backfill when the derived column should not live in the source
+table — a re-embedding is then a new view, not a rewrite of the catalog — and note
+that the view's rows are 1:1 with the source's, so `refresh` is incremental across
+appends. As with a chunker view, that incremental refresh only survives the source
+version moving if the **source** has stable row IDs, so both view kinds call
+`require_stable_row_ids()` before creating anything.
+
+A batch UDF (`__call__(self, col: pa.Array) -> pa.Array`) is the right shape for
+any model stage: load the model once in `setup()`, then encode the whole task in
+`batch_size` chunks. Return a full-length array — scatter nulls back for rows you
+skipped, as `embed_description.py` does for blank descriptions, or the column
+silently misaligns.
 
 ---
 

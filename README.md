@@ -21,6 +21,9 @@ What's here:
    - `images` — file size/dimensions, OpenCLIP embeddings, BLIP captions
    - `video` — chunk videos into clips, then per-frame embeddings/captions/OpenPose
    - `pdf` — per-page text + overlapping chunks (Geneva's `geneva.udfs.document`)
+   - `audio` — text → MMS-TTS speech → Whisper transcript → .wav export
+   - `text` — a synthetic product catalog, then a **materialized view** whose
+     embedding column is a batch sentence-transformers UDF
    - shared model UDFs (OpenCLIP, BLIP) live in
      [`examples/_shared/`](geneva_examples/examples/_shared/)
 2. **A Textual TUI** (`uv run tui`) that lists the examples, shows each step's
@@ -114,7 +117,9 @@ geneva-examples/
 │   │   ├── _shared/                  # model UDFs shared across examples (clip, blip)
 │   │   ├── images/                   # __init__ (spec) + imageinfo + ingest/lightweight/embed/caption
 │   │   ├── video/                    # spec + chunkers (bytes/blob/URI) + ingest/chunk (+ openvid/external) + frame-*/seed
-│   │   └── pdf/                      # spec + document UDFs + ingest/chunk
+│   │   ├── pdf/                      # spec + document UDFs + ingest/chunk
+│   │   ├── audio/                    # spec + TTS/Whisper UDFs + ingest/synthesize/transcribe/export
+│   │   └── text/                     # spec + products (synthetic catalog) + embed_description UDF + ingest/enrich
 │   ├── tui/                          # Textual TUI: Tables/Jobs/Tools/Examples nav (app.py) + form helpers (forms.py)
 │   ├── ops/                          # inspection/teardown CLIs: stats, jobs, cleanup, delete-table
 │   └── apps/                         # local (non-cluster) apps
@@ -353,6 +358,72 @@ uv run chunk-pdfs                        # backfill `pages` + `chunks` (CPU)
 Each PDF stays one row, carrying its `pages`/`chunks` lists — ready to embed or
 explode into a per-chunk table. Prototype a PDF function first in UDF Studio
 (the `pdf` modality, below) before wiring in a stage.
+
+## Text workflow — a materialized view computes the embeddings
+
+Every stage above adds a column to a table and **backfills** it. This example
+takes Geneva's other path: the UDF lives in a **materialized view's projection**,
+and `refresh` is what runs it.
+
+```bash
+uv run ingest-products   # seed a synthetic `products` catalog (no download, no creds)
+uv run enrich-products   # create `products_enriched_mv` + refresh -> embeddings
+                         # ends with a semantic search; --no-search-demo to skip
+```
+
+`ingest-products` generates the catalog locally — `product_id`, `title`,
+`description`, `category`, `word_count` — from per-category vocabularies
+(apparel, kitchen, electronics, garden, books), so descriptions in different
+categories are genuinely far apart in embedding space and the search below has
+something real to find.
+
+`enrich-products` then builds a query whose `select` mixes plain columns with one
+UDF-computed column, and materializes it:
+
+```python
+query = table.search(None).select({
+    "product_id":  "product_id",
+    "title":       "title",
+    "description": "description",
+    "category":    "category",
+    "word_count":  "word_count",
+    "embedding":   EmbedDescription(),      # batch sentence-transformers UDF
+})
+db.create_materialized_view("products_enriched_mv", query)
+view.refresh(concurrency=4)                 # <- the UDF runs here
+```
+
+Three things are worth noticing:
+
+- **`create_materialized_view` computes nothing.** It records the query (with the
+  marshalled UDF) and creates the view empty; `refresh` executes the UDF — on
+  local Ray in local mode, on the remote Geneva workers in enterprise mode — and
+  commits the rows. The view's schema is `__source_row_id` + `__is_set` + your
+  projected columns.
+- **The UDF is a *batch* UDF.** Its `__call__` receives the whole `pa.Array` for a
+  task, loads the model once per actor in `setup()`, and encodes in
+  `--batch-size` forward passes (all-MiniLM-L6-v2, 384-dim, L2-normalized, and it
+  auto-downloads to the HF cache). Null/blank descriptions stay null instead of
+  being embedded as the empty string. A `str` value in that same projection is a
+  SQL expression, so derived scalars can be computed in the same pass.
+- **The catalog is never rewritten.** The vectors live in the view, so re-embedding
+  with a different checkpoint (`--model-name`, `--dim`) means rebuilding a view,
+  not rewriting the source. `--dim` is inferred for the checkpoints in
+  `MODEL_DIMS` and verified against the loaded model, so a mismatch fails with a
+  clear message instead of writing malformed vectors.
+
+Because the view's rows are 1:1 with the catalog's, refresh is **incremental** —
+append products and embed only what was added:
+
+```bash
+uv run ingest-products --no-overwrite --rows 50   # append (ids continue from the row count)
+uv run enrich-products --no-overwrite             # refresh the view; embeds only the new rows
+```
+
+That only works because `ingest-products` creates the table with **stable row
+IDs**; `enrich-products` refuses to build a view over a source without them
+rather than leave you a view that breaks the first time compaction moves the
+source version.
 
 ## Inspecting state
 

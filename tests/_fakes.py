@@ -156,6 +156,15 @@ class FakeConn:
         self.created[name] = view
         return view
 
+    def create_materialized_view(
+        self, name: str, query: Any = None, **_kwargs: Any
+    ) -> FakeTable:
+        """Plain-query MV (the text example): the UDF rides in ``query``'s select."""
+        view = self._table if self._table is not None else FakeTable()
+        self._tables.setdefault(name, view)
+        self.created[name] = view
+        return view
+
     def table_names(self) -> list[str]:
         return list(self._tables) or list(self.created)
 
